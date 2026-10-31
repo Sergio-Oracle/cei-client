@@ -43,6 +43,12 @@ function openDeepLink(u) {
     if (x.protocol === PROTO + ':' && x.hostname === 'exam' && /^\/\d+$/.test(x.pathname) && win && !win.isDestroyed()) win.loadURL(`${cfg.url.replace(/\/$/, '')}/exam${x.pathname}`)
   } catch { /* lien illisible : ignoré */ }
 }
+const selfIdentity = () => {
+  const names = new Set(['cei examen', 'cei-examen', 'ceiexamen', 'electron', path.basename(process.execPath).toLowerCase().replace(/\.(exe|app)$/, '')])
+  const pids = new Set([process.pid, process.ppid])
+  try { for (const m of app.getAppMetrics()) pids.add(m.pid) } catch { /* avant ready */ }
+  return { names, pids }
+}
 const isAllowed = u => { try { const h = new URL(u).hostname; return cfg.allowedHosts.some(a => h === a || h.endsWith('.' + a)) } catch { return false } }
 const logFile = () => path.join(app.getPath('userData'), 'client.log')
 const log = (...a) => { try { fs.appendFileSync(logFile(), `${new Date().toISOString()} ${a.join(' ')}\n`) } catch { /* journal local facultatif */ } }
@@ -150,6 +156,21 @@ function startWatchers() {
     }
   })
   every(1500, () => { if (exam.active) clipboard.clear() })  // rien d'extérieur ne peut être collé
+  let sweeping = false
+  every(cfg.appsMs, async () => {                              // toute autre application avec une fenêtre est fermée aussitôt
+    if (!exam.active || sweeping) return
+    sweeping = true
+    try {
+      const apps = await guard.listWindowApps(selfIdentity())
+      if (apps.length) {
+        const left = await guard.closeApps(apps, selfIdentity(), { force: true })
+        for (const a of apps) {
+          const last = exam.forbiddenSeen.get('app:' + a.name) || 0
+          if (Date.now() - last > 60 * 1000) { exam.forbiddenSeen.set('app:' + a.name, Date.now()); report('client_app_closed', { name: a.name, still_open: left.some(x => x.name === a.name) }) }
+        }
+      }
+    } finally { sweeping = false }
+  })
   every(cfg.scanMs, async () => {
     if (!exam.active) return
     for (const name of await guard.forbiddenRunning()) {
@@ -223,6 +244,15 @@ ipcMain.handle('cei:sign', (e, { nonce, userId, examId } = {}) => {
   const sig = crypto.createHmac('sha256', cfg.clientSecret).update(msg).digest('hex')
   return { sig, version: cfg.version, platform: process.platform, vm: vmInfo.vm, vm_hint: vmInfo.hint, examId }
 })
+ipcMain.handle('cei:apps', async e => fromAllowed(e) ? { apps: [...new Map((await guard.listWindowApps(selfIdentity())).map(a => [a.name, a])).values()].map(a => ({ name: a.name })) } : null)
+ipcMain.handle('cei:apps-close', async e => {
+  if (!fromAllowed(e)) return null
+  const self = selfIdentity()
+  const apps = await guard.listWindowApps(self)
+  const left = await guard.closeApps(apps, self, { graceMs: 6000 })
+  log('APPS CLOSED', apps.map(a => a.name).join(','), 'left=' + left.map(a => a.name).join(','))
+  return { closed: apps.length - left.length, remaining: [...new Set(left.map(a => a.name))].map(name => ({ name })) }
+})
 ipcMain.handle('cei:enter', (e, opts) => fromAllowed(e) ? enterExamMode(opts) : { ok: false })
 ipcMain.handle('cei:leave', e => fromAllowed(e) ? leaveExamMode() : { ok: false })
 
@@ -249,6 +279,7 @@ app.whenReady().then(async () => {
     try { const s = await desktopCapturer.getSources({ types: ['screen'] }); cb(s[0] ? { video: s[0] } : {}) } catch { cb({}) }
   })
   try { app.setAsDefaultProtocolClient(PROTO) } catch { /* non fatal */ }
+  guard.setExtraAllow(cfg.allowApps)
   vmInfo = await guard.detectVM()
   log('START', cfg.version, process.platform, 'vm=' + vmInfo.vm, vmInfo.hint)
   createWindow()

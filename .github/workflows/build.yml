@@ -1,0 +1,51 @@
+# Construit l'application CEI Examen pour Windows, macOS et Linux, SANS avoir besoin d'un Mac :
+# GitHub fournit gratuitement (dépôt public) ou dans le quota (dépôt privé) des machines macOS.
+#
+# À faire UNE fois dans GitHub : Settings → Secrets and variables → Actions → New repository secret
+#   CEI_CLIENT_SECRET   contenu de build/server.env (la valeur après « = »)
+#   CEI_QUIT_HASH       valeur « quitHash » de src/secret.json
+# Lancer : onglet Actions → « Construire CEI Examen » → Run workflow  (ou pousser une étiquette  v1.2.0 )
+name: Construire CEI Examen
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  flags: '--linux AppImage',  name: linux }
+          - { os: windows-latest, flags: '--win nsis zip',    name: windows }
+          - { os: macos-latest,   flags: '--mac dmg zip',     name: macos }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - name: Secrets embarqués (jamais dans le dépôt)
+        shell: bash
+        run: |
+          node -e "
+          const fs=require('fs');
+          if(!process.env.S||!process.env.Q){console.error('Secrets CEI_CLIENT_SECRET / CEI_QUIT_HASH manquants');process.exit(1)}
+          fs.writeFileSync('src/secret.json',JSON.stringify({clientSecret:process.env.S,quitHash:process.env.Q}))"
+        env:
+          S: ${{ secrets.CEI_CLIENT_SECRET }}
+          Q: ${{ secrets.CEI_QUIT_HASH }}
+      - run: node test/unit.js
+      - name: Construction
+        run: npx electron-builder ${{ matrix.flags }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # pas de certificat de signature : voir README
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cei-examen-${{ matrix.name }}
+          path: |
+            dist/*.AppImage
+            dist/*.exe
+            dist/*.zip
+            dist/*.dmg
+          if-no-files-found: error

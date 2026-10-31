@@ -9,10 +9,16 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node test/smoke.js",
-    "dist:linux": "electron-builder --linux AppImage deb",
-    "dist:win": "electron-builder --win zip",
-    "dist:mac": "electron-builder --mac dmg"
+    "test": "node test/unit.js && node test/smoke.js",
+    "test:unit": "node test/unit.js",
+    "secret": "node scripts/make-secret.js",
+    "build:linux": "node scripts/build.js linux",
+    "build:win": "node scripts/build.js win",
+    "build:mac": "node scripts/build.js mac",
+    "build:all": "node scripts/build.js all",
+    "release:patch": "node scripts/build.js all --bump patch",
+    "release:minor": "node scripts/build.js all --bump minor",
+    "release:major": "node scripts/build.js all --bump major"
   },
   "build": {
     "appId": "sn.unchk.cei.examen",
@@ -34,10 +40,27 @@
     "win": {
       "target": [
         "zip"
-      ]
+      ],
+      "signAndEditExecutable": false
     },
     "mac": {
-      "category": "public.app-category.education"
+      "category": "public.app-category.education",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "identity": null,
+      "hardenedRuntime": false
     }
   },
   "devDependencies": {

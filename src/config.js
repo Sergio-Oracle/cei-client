@@ -20,6 +20,9 @@ module.exports = {
   clientSecret: secret.clientSecret || process.env.CEI_CLIENT_SECRET || 'dev-secret-non-securise',
   // Empreinte SHA-256 du code de sortie d'urgence (donné par le surveillant). Vide = sortie d'urgence désactivée.
   quitHash: secret.quitHash || process.env.CEI_QUIT_HASH || '',
+  // Applications autorisées à rester ouvertes pendant l'examen (en plus du bureau du système) : accessibilité, besoins particuliers…
+  allowApps: (process.env.CEI_ALLOW_APPS || '').split(',').map(s => s.trim()).filter(Boolean),
+  appsMs: parseInt(process.env.CEI_APPS_MS || '4000', 10),
   devtools: process.env.CEI_DEVTOOLS === '1',
   test: process.env.CEI_TEST === '1',
   scanMs: parseInt(process.env.CEI_SCAN_MS || '20000', 10),

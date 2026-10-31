@@ -3,6 +3,11 @@
 // Ne jamais versionner ces deux fichiers. Le secret du client et CEI_CLIENT_SECRET du serveur DOIVENT être identiques.
 const crypto = require('crypto'), fs = require('fs'), path = require('path')
 const root = path.join(__dirname, '..')
+const force = process.argv.includes('--force')
+if (fs.existsSync(path.join(root, 'src', 'secret.json')) && !force) {
+  console.log('Secrets déjà présents (src/secret.json) : conservés. Un nouveau secret rendrait INVALIDES les applications déjà installées.\nPour en générer un nouveau malgré tout : node scripts/make-secret.js --force')
+  process.exit(0)
+}
 const clientSecret = crypto.randomBytes(32).toString('hex')
 const quitCode = String(crypto.randomInt(100000, 999999)) + '-' + String(crypto.randomInt(1000, 9999))
 const quitHash = crypto.createHash('sha256').update(quitCode).digest('hex')
