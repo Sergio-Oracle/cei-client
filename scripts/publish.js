@@ -17,9 +17,10 @@ const files = []
 for (const f of fs.readdirSync(dist)) {
   const k = KINDS.find(([re]) => re.test(f))
   if (!k) continue
-  const src = path.join(dist, f), dst = path.join(out, f)
+  const safe = f.replace(/\s+/g, '-')                          // pas d'espaces dans les adresses de téléchargement
+  const src = path.join(dist, f), dst = path.join(out, safe)
   fs.copyFileSync(src, dst)
-  files.push({ name: f, platform: k[1], label: k[2], sha256: crypto.createHash('sha256').update(fs.readFileSync(dst)).digest('hex') })
+  files.push({ name: safe, platform: k[1], label: k[2], sha256: crypto.createHash('sha256').update(fs.readFileSync(dst)).digest('hex') })
 }
 fs.writeFileSync(path.join(out, 'latest.json'), JSON.stringify({ version: pkg.version, files, notes: '' }, null, 2))
 console.log(`${files.length} fichier(s) publiés dans ${out} (version ${pkg.version}).`)
