@@ -1,0 +1,6 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>CEI Examen</title>
+<style>body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}
+.box{max-width:520px;padding:32px}h1{font-size:24px;margin:0 0 12px}p{color:#94a3b8;line-height:1.6}button{margin-top:18px;padding:12px 22px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-size:16px;font-weight:600;cursor:pointer}</style></head>
+<body><div class="box"><h1>Connexion impossible</h1><p>Le client CEI Examen n'arrive pas à joindre la plateforme. Vérifiez votre connexion internet puis réessayez. Votre travail déjà saisi est conservé sur cet ordinateur.</p>
+<button id="r">Réessayer</button></div>
+<script>document.getElementById('r').onclick=()=>{const u=new URLSearchParams(location.search).get('url');if(u)location.href=u}</script></body></html>

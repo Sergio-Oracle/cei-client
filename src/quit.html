@@ -1,0 +1,10 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Code de sortie</title>
+<style>body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh}
+.box{width:340px}h1{font-size:18px;margin:0 0 10px}input{width:100%;padding:11px;border-radius:8px;border:1px solid #475569;background:#1e293b;color:#fff;font-size:16px;box-sizing:border-box}
+button{margin-top:12px;width:100%;padding:11px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-size:16px;font-weight:600;cursor:pointer}#m{margin-top:10px;color:#fca5a5;font-size:14px;min-height:18px}</style></head>
+<body><div class="box"><h1>Code de sortie d'urgence</h1><input id="c" type="password" autofocus placeholder="Code donné par le surveillant"><button id="b">Quitter</button><div id="m"></div></div>
+<script>
+const {ipcRenderer}=require('electron')
+const go=async()=>{const r=await ipcRenderer.invoke('cei:quit-code',document.getElementById('c').value);if(!r.ok)document.getElementById('m').textContent=r.message||'Code incorrect'}
+document.getElementById('b').onclick=go;document.getElementById('c').addEventListener('keydown',e=>{if(e.key==='Enter')go()})
+</script></body></html>

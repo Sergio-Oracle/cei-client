@@ -1,0 +1,48 @@
+{
+  "name": "cei-examen",
+  "productName": "CEI Examen",
+  "version": "1.0.0",
+  "description": "Client d'examen sécurisé du Centre d'Examen Intelligent (UN-CHK) : mode kiosque, équivalent de Safe Exam Browser",
+  "main": "src/main.js",
+  "author": "UN-CHK — Centre d'Examen Intelligent",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/smoke.js",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:win": "electron-builder --win zip",
+    "dist:mac": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "sn.unchk.cei.examen",
+    "productName": "CEI Examen",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "src/main.js"
+    },
+    "linux": {
+      "category": "Education",
+      "maintainer": "UN-CHK CEI <cei@unchk.sn>"
+    },
+    "win": {
+      "target": [
+        "zip"
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.education"
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.7.1",
+    "electron-builder": "^26.18.0"
+  },
+  "homepage": "https://cei.unchk.sn"
+}
