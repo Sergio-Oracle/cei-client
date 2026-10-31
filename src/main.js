@@ -28,6 +28,7 @@ if (process.platform === 'linux' && process.env.APPIMAGE) {
   if (rd('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') === '1' || rd('/proc/sys/kernel/unprivileged_userns_clone') === '0') app.commandLine.appendSwitch('no-sandbox')
 }
 if (process.env.CEI_USERDATA) app.setPath('userData', process.env.CEI_USERDATA)      // essais : profil jetable
+if (process.platform === 'win32') app.setAppUserModelId('sn.unchk.cei.examen')   // icône et regroupement corrects dans la barre des tâches
 if (!cfg.test && !app.requestSingleInstanceLock()) { app.quit() }
 
 let win = null
@@ -72,7 +73,7 @@ function createWindow() {
   Menu.setApplicationMenu(null)
   win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#0f172a', title: 'CEI Examen',
-    autoHideMenuBar: true, icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    autoHideMenuBar: true, icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true,
       devTools: cfg.devtools, spellcheck: false, webSecurity: true, allowRunningInsecureContent: false, backgroundThrottling: false,

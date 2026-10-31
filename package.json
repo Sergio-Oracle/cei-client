@@ -1,7 +1,7 @@
 {
   "name": "cei-examen",
   "productName": "CEI Examen",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Client d'examen sécurisé du Centre d'Examen Intelligent (UN-CHK) : mode kiosque, équivalent de Safe Exam Browser",
   "main": "src/main.js",
   "author": "UN-CHK — Centre d'Examen Intelligent",

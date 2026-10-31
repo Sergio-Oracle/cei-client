@@ -17,7 +17,7 @@ const unpacked = path.join(root, 'dist', 'win-unpacked')
 if (!fs.existsSync(path.join(unpacked, 'CEI Examen.exe'))) { console.error('✘ dist/win-unpacked introuvable : construisez d\'abord Windows (node scripts/build.js win).'); process.exit(1) }
 if (spawnSync('makensis', ['-VERSION']).status !== 0) { console.error('✘ makensis introuvable (Linux : apt install nsis ; macOS : brew install nsis ; Windows : installer NSIS).'); process.exit(1) }
 
-const ico = path.join(root, 'dist', '.icon-ico', 'icon.ico')
+const ico = path.join(root, 'build', 'icon.ico')
 const out = path.join(root, 'dist', `CEI-Examen-${pkg.version}-win-setup.exe`)
 const q = p => p.replace(/\//g, '\\')            // chemins au format NSIS
 const nsi = `Unicode true
