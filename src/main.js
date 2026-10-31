@@ -85,15 +85,15 @@ function createWindow() {
   win.webContents.on('will-navigate', guardNav)
   win.webContents.on('will-redirect', guardNav)
   win.webContents.on('did-fail-load', (_e, code, _d, url, isMain) => {
-    if (isMain && code !== -3) win.loadFile(path.join(__dirname, 'offline.html'), { query: { url: cfg.url } })
+    if (isMain && code !== -3) win.loadFile(path.join(__dirname, 'offline.html'), { query: { url: cfg.startUrl } })
   })
   win.webContents.on('did-finish-load', () => { pageReady = true; while (pending.length) win.webContents.send('cei:event', pending.shift()) })
-  win.webContents.on('render-process-gone', () => { log('CRASH renderer'); setTimeout(() => win && !win.isDestroyed() && win.loadURL(cfg.url), 800) })
+  win.webContents.on('render-process-gone', () => { log('CRASH renderer'); setTimeout(() => win && !win.isDestroyed() && win.loadURL(cfg.startUrl), 800) })
   win.on('unresponsive', () => setTimeout(() => win && !win.isDestroyed() && win.reload(), 20000))
   win.webContents.on('before-input-event', onInput)
   win.on('close', e => { if (exam.active && !allowQuit) { e.preventDefault(); report('client_close_attempt') } })
   win.on('closed', () => { win = null })
-  win.loadURL(cfg.url)
+  win.loadURL(cfg.startUrl)
 }
 
 // ── Raccourcis : bloqués pendant l'examen ──────────────────────────────────────────────────────────────────────────────

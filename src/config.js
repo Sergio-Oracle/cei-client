@@ -14,6 +14,8 @@ const extra = (process.env.CEI_ALLOWED_HOSTS || 'sfu-cei.unchk.sn').split(',').m
 module.exports = {
   version: pkg.version,
   url,
+  // Page d'ouverture de l'application installée : la connexion (comme la version web installable), pas la vitrine publique.
+  startUrl: new URL(process.env.CEI_START || '/login', url).toString(),
   // Seuls ces hôtes (et leurs sous-domaines directs) peuvent être ouverts dans la fenêtre d'examen.
   allowedHosts: [host, ...extra],
   // Secret partagé avec le serveur (variable CEI_CLIENT_SECRET) : signe la poignée de main « je suis bien le client officiel ».
