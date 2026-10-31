@@ -39,6 +39,7 @@
     },
     "win": {
       "target": [
+        "nsis",
         "zip"
       ],
       "signAndEditExecutable": false
@@ -73,7 +74,12 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "CEI Examen",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "language": "1036",
+      "uninstallDisplayName": "CEI Examen"
     }
   },
   "devDependencies": {

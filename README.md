@@ -26,7 +26,7 @@ Prérequis une seule fois : Node.js 20+, puis `cd /root/cei-client && npm instal
 | Je veux… | Commande |
 |---|---|
 | Construire pour Linux | `npm run build:linux` |
-| Construire pour Windows (ZIP, depuis Linux ou Windows) | `npm run build:win` |
+| Construire pour Windows (installateur .exe + ZIP, depuis Linux ou Windows) | `npm run build:win` |
 | Construire pour macOS (**sur un Mac uniquement**) | `npm run build:mac` |
 | Tout ce que cette machine sait construire | `npm run build:all` |
 | Nouvelle version corrective (1.0.0 → 1.0.1) puis construire | `npm run release:patch` |
@@ -60,3 +60,11 @@ Un paquet macOS ne peut être produit que par un Mac. Trois façons de l'obtenir
 `xattr -cr "/Applications/CEI Examen.app"` dans le Terminal) et Windows affiche l'écran SmartScreen (*Informations complémentaires* → *Exécuter quand même*).
 Pour les supprimer : compte Apple Developer (99 USD/an, signature + notarisation) et certificat de signature de code Windows (environ 100 à 400 USD/an).
 Ni l'un ni l'autre n'est nécessaire pour que l'application fonctionne.
+
+## Installateur Windows
+
+`npm run build:win` produit **deux fichiers** : l'archive ZIP et un **installateur** `CEI-Examen-<version>-win-setup.exe` (installation sans droits administrateur,
+raccourcis Bureau et menu Démarrer, désinstallation dans « Applications installées », lien `ceiexamen://`, assistant en français).
+L'installateur est fabriqué par `scripts/make-installer.js` avec **NSIS** (`apt install nsis` sous Linux, `brew install nsis` sous macOS) : l'outil
+habituel d'electron-builder exigerait Wine, inutile ici. Sans `makensis`, seule l'archive ZIP est produite (avec un message).
+Il est vérifié à la construction (contenu, fichiers) mais n'a pas encore été exécuté sur un vrai Windows : l'essayer avant de le diffuser.

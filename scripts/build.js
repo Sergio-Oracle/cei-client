@@ -49,6 +49,10 @@ fs.rmSync(path.join(root, 'dist'), { recursive: true, force: true })
 for (const t of wanted) {
   const flags = { linux: ['--linux', 'AppImage'], win: ['--win', 'zip'], mac: ['--mac', 'dmg', 'zip'] }[t]
   run('npx', ['electron-builder', ...flags])
+  if (t === 'win') {                                          // installateur Windows (raccourcis, désinstallation) : NSIS direct, sans Wine
+    if (spawnSync('makensis', ['-VERSION']).status === 0) run('node', ['scripts/make-installer.js'])
+    else console.log('ℹ  makensis absent : seule l\'archive ZIP Windows est produite (apt install nsis pour l\'installateur).')
+  }
 }
 
 const out = opt('--publish')
