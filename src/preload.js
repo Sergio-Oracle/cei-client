@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('ceiClient', {
   info: () => ipcRenderer.invoke('cei:info'),
   status: () => ipcRenderer.invoke('cei:status'),
   sign: (nonce, userId, examId) => ipcRenderer.invoke('cei:sign', { nonce, userId, examId }),
+  askMedia: () => ipcRenderer.invoke('cei:ask-media'),
   listApps: () => ipcRenderer.invoke('cei:apps'),
   closeApps: () => ipcRenderer.invoke('cei:apps-close'),
   enterExamMode: opts => ipcRenderer.invoke('cei:enter', opts || {}),

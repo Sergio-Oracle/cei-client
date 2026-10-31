@@ -50,6 +50,38 @@ const has = t => events.some(e => e.type === t)
   for (let i = 0; i < 20 && !events.some(e => e.type === 'client_app_closed'); i++) await wait(1000)
   rep('application étrangère ouverte pendant l\\'examen : fermée et signalée', events.some(e => e.type === 'client_app_closed' && /xeyes/.test(e.data.name)), JSON.stringify(events.filter(e => e.type === 'client_app_closed')))
   rep('perte de focus signalée puis premier plan repris', has('window_blur'))
+  // ── Médias : caméra, micro, partage d'écran, WebRTC, notifications — dans l'application, en mode examen ──
+  try {
+    const cam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: true })
+    const v = cam.getVideoTracks()[0], a = cam.getAudioTracks()[0]
+    rep('caméra : flux vidéo actif', v && v.readyState === 'live' && (v.getSettings().width || 0) >= 320, JSON.stringify(v && v.getSettings()))
+    rep('micro : flux audio actif', a && a.readyState === 'live')
+    window.__cam = cam
+  } catch (e) { rep('caméra et micro', false, e.name + ' ' + e.message) }
+  try {
+    const ss = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always', displaySurface: 'monitor' }, preferCurrentTab: false, audio: false })
+    const t = ss.getVideoTracks()[0], st = t.getSettings()
+    rep('partage d\\'écran complet : flux actif, surface acceptée par l\\'examen', t.readyState === 'live' && (st.displaySurface === undefined || st.displaySurface === 'monitor'), JSON.stringify(st))
+    const ended = new Promise(r => t.addEventListener('ended', () => r(true)))
+    t.stop()
+    rep('partage d\\'écran : arrêt détectable', t.readyState === 'ended')
+  } catch (e) { rep('partage d\\'écran complet', false, e.name + ' ' + e.message) }
+  try {
+    const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection()
+    pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate)
+    pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate)
+    ;(window.__cam ? window.__cam.getTracks() : []).forEach(t => pc1.addTrack(t, window.__cam))
+    const got = new Promise(r => { pc2.ontrack = () => r(true); setTimeout(() => r(false), 9000) })
+    await pc1.setLocalDescription(await pc1.createOffer()); await pc2.setRemoteDescription(pc1.localDescription)
+    await pc2.setLocalDescription(await pc2.createAnswer()); await pc1.setRemoteDescription(pc2.localDescription)
+    const ok = await got
+    await wait(1500)
+    let sent = 0; (await pc1.getStats()).forEach(r => { if (r.type === 'outbound-rtp' && r.kind === 'video') sent = r.bytesSent || 0 })
+    rep('WebRTC : flux vidéo transmis entre deux connexions (comme vers le serveur de visioconférence)', ok && sent > 1000, 'octets envoyés : ' + sent)
+    pc1.close(); pc2.close()
+  } catch (e) { rep('WebRTC', false, e.name + ' ' + e.message) }
+  rep('notifications autorisées', (await Notification.requestPermission()) === 'granted')
+  rep('WebAssembly disponible (détection du visage)', typeof WebAssembly === 'object')
   const lv = await c.leaveExamMode(); await wait(200)
   const st2 = await c.status()
   rep('mode examen quitté', lv.ok && st2 && !st2.examMode && !st2.kiosk, JSON.stringify(st2))
@@ -92,8 +124,8 @@ server.listen(0, '127.0.0.1', () => {
   const env = { ...base, CEI_URL: `http://127.0.0.1:${port}/`, CEI_ALLOWED_HOSTS: '127.0.0.1', CEI_TEST: '1', CEI_USERDATA: fs.mkdtempSync('/tmp/cei-smoke-'), CEI_SCAN_MS: '1000', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
   const bin = process.env.CEI_BIN ? [process.env.CEI_BIN] : [path.join(__dirname, '..', 'node_modules', '.bin', 'electron'), path.join(__dirname, '..')]   // CEI_BIN : essai du binaire EMPAQUETÉ
   const sh = `xmessage -timeout 300 bonjour & (sleep 14; xeyes) & exec "$@"`
-  child = spawn('xvfb-run', ['-a', 'sh', '-c', sh, 'cei', ...bin, '--no-sandbox', '--disable-gpu'], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+  child = spawn('xvfb-run', ['-a', 'sh', '-c', sh, 'cei', ...bin, '--no-sandbox', '--disable-gpu', '--use-fake-device-for-media-stream'], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
   child.stdout.on('data', d => { const t = String(d); if (/PAGE>|Error|Uncaught/.test(t)) process.stdout.write(t) })
   child.stderr.on('data', d => { const s = String(d); if (/Error|Uncaught/i.test(s) && !/dbus|gpu|vaapi|Fontconfig/i.test(s)) process.stderr.write(s) })
-  setTimeout(() => { if (!done) { console.log('  ✘ délai dépassé (le client ne répond pas)'); finish([{ n: 'délai', ok: false, d: 'timeout' }]) } }, 90000)
+  setTimeout(() => { if (!done) { console.log('  ✘ délai dépassé (le client ne répond pas)'); finish([{ n: 'délai', ok: false, d: 'timeout' }]) } }, 120000)
 })

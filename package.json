@@ -1,7 +1,7 @@
 {
   "name": "cei-examen",
   "productName": "CEI Examen",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Client d'examen sécurisé du Centre d'Examen Intelligent (UN-CHK) : mode kiosque, équivalent de Safe Exam Browser",
   "main": "src/main.js",
   "author": "UN-CHK — Centre d'Examen Intelligent",
@@ -60,7 +60,20 @@
         }
       ],
       "identity": null,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "CEI Examen utilise la caméra pour la surveillance de l'examen.",
+        "NSMicrophoneUsageDescription": "CEI Examen utilise le microphone pour la surveillance de l'examen.",
+        "NSScreenCaptureDescription": "CEI Examen partage votre écran avec le surveillant pendant l'examen."
+      }
+    },
+    "nsis": {
+      "artifactName": "CEI-Examen-${version}-win-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   },
   "devDependencies": {

@@ -13,7 +13,7 @@
  * Limite assumée : aucune application ne peut intercepter Ctrl+Alt+Suppr ni la coupure de courant ; tout ce qui peut être fait
  * est fait, et le reste est détecté et tracé côté serveur.
  */
-const { app, BrowserWindow, session, globalShortcut, screen, clipboard, ipcMain, Menu, desktopCapturer } = require('electron')
+const { app, BrowserWindow, session, globalShortcut, screen, clipboard, ipcMain, Menu, desktopCapturer, systemPreferences } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
@@ -237,7 +237,20 @@ ipcMain.handle('cei:quit-code', (_e, code) => {
 // ── Pont avec la page CEI (uniquement depuis un site autorisé) ───────────────────────────────────────────────────────────────
 const fromAllowed = e => { try { return isAllowed(e.senderFrame.url) } catch { return false } }
 ipcMain.handle('cei:info', e => fromAllowed(e) ? { client: 'CEIExamClient', version: cfg.version, platform: process.platform, arch: process.arch, examMode: exam.active, vm: vmInfo.vm } : null)
-ipcMain.handle('cei:status', e => fromAllowed(e) ? { examMode: exam.active, displays: screen.getAllDisplays().length, focused: !!(win && win.isFocused()), kiosk: !!(win && win.isKiosk()), shortcuts: globalOk, vm: vmInfo.vm } : null)
+// Autorisations du système (Windows 10/11 et macOS) : caméra, micro, enregistrement de l'écran (macOS). 'granted' | 'denied' | 'not-determined' | 'unknown'
+const mediaAccess = () => {
+  const get = k => { try { return systemPreferences.getMediaAccessStatus ? systemPreferences.getMediaAccessStatus(k) : 'unknown' } catch { return 'unknown' } }
+  return { camera: get('camera'), microphone: get('microphone'), screen: get('screen') }
+}
+// macOS : déclenche la demande d'autorisation caméra / micro MAINTENANT (avant l'examen), pas au milieu de la composition
+ipcMain.handle('cei:ask-media', async e => {
+  if (!fromAllowed(e)) return null
+  if (process.platform === 'darwin' && systemPreferences.askForMediaAccess) {
+    for (const k of ['camera', 'microphone']) { try { await systemPreferences.askForMediaAccess(k) } catch { /* refusé ou indisponible */ } }
+  }
+  return mediaAccess()
+})
+ipcMain.handle('cei:status', e => fromAllowed(e) ? { examMode: exam.active, media: mediaAccess(), displays: screen.getAllDisplays().length, focused: !!(win && win.isFocused()), kiosk: !!(win && win.isKiosk()), shortcuts: globalOk, vm: vmInfo.vm } : null)
 ipcMain.handle('cei:sign', (e, { nonce, userId, examId } = {}) => {
   if (!fromAllowed(e) || !nonce) return null
   const msg = `${nonce}|${userId}|${cfg.version}|${process.platform}`
