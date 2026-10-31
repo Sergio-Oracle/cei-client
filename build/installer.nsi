@@ -1,21 +1,21 @@
 Unicode true
 !define APP "CEI Examen"
 !define EXE "CEI Examen.exe"
-!define VERSION "1.1.1"
+!define VERSION "1.1.2"
 !define KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\CEIExamen"
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 Name "${APP}"
-OutFile "/root/cei-client/dist/CEI-Examen-1.1.1-win-setup.exe"
+OutFile "/root/cei-client/dist/CEI-Examen-1.1.2-win-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\CEI Examen"
 InstallDirRegKey HKCU "Software\CEI Examen" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "CEI Examen ${VERSION} — Université Numérique Cheikh Hamidou Kane"
-VIProductVersion "1.1.1.0"
+VIProductVersion "1.1.2.0"
 VIAddVersionKey /LANG=1036 "ProductName" "CEI Examen"
 VIAddVersionKey /LANG=1036 "FileDescription" "Installateur de CEI Examen"
-VIAddVersionKey /LANG=1036 "FileVersion" "1.1.1"
+VIAddVersionKey /LANG=1036 "FileVersion" "1.1.2"
 VIAddVersionKey /LANG=1036 "LegalCopyright" "© 2026 UN-CHK — Centre d'Examen Intelligent"
 VIAddVersionKey /LANG=1036 "CompanyName" "UN-CHK — Centre d'Examen Intelligent"
 

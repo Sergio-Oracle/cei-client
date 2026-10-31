@@ -1,7 +1,7 @@
 {
   "name": "cei-examen",
   "productName": "CEI Examen",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Client d'examen sécurisé du Centre d'Examen Intelligent (UN-CHK) : mode kiosque, équivalent de Safe Exam Browser",
   "main": "src/main.js",
   "author": "UN-CHK — Centre d'Examen Intelligent",
@@ -35,7 +35,17 @@
     },
     "linux": {
       "category": "Education",
-      "maintainer": "UN-CHK CEI <cei@unchk.sn>"
+      "maintainer": "UN-CHK CEI <cei@unchk.sn>",
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "mimeTypes": [
+        "x-scheme-handler/ceiexamen"
+      ],
+      "synopsis": "Client d'examen sécurisé",
+      "description": "Application CEI Examen : notes, examens et mode examen verrouillé (équivalent de Safe Exam Browser)."
     },
     "win": {
       "target": [
@@ -80,6 +90,23 @@
       "deleteAppDataOnUninstall": false,
       "language": "1036",
       "uninstallDisplayName": "CEI Examen"
+    },
+    "appImage": {
+      "artifactName": "CEI-Examen-${version}-linux-x86_64.${ext}"
+    },
+    "deb": {
+      "artifactName": "CEI-Examen-${version}-linux-amd64.${ext}",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
     }
   },
   "devDependencies": {

@@ -21,6 +21,12 @@ const cfg = require('./config')
 const guard = require('./guard')
 
 app.userAgentFallback = `${app.userAgentFallback} CEIExamClient/${cfg.version}`
+// AppImage sur Ubuntu 23.10+ / systèmes restreignant les espaces de noms utilisateurs : le bac à sable de Chromium ne peut pas démarrer
+// (« SUID sandbox helper… »). On le désactive alors UNIQUEMENT dans ce cas ; le paquet .deb, lui, règle le bac à sable à l'installation.
+if (process.platform === 'linux' && process.env.APPIMAGE) {
+  const rd = f => { try { return fs.readFileSync(f, 'utf8').trim() } catch { return '' } }
+  if (rd('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') === '1' || rd('/proc/sys/kernel/unprivileged_userns_clone') === '0') app.commandLine.appendSwitch('no-sandbox')
+}
 if (process.env.CEI_USERDATA) app.setPath('userData', process.env.CEI_USERDATA)      // essais : profil jetable
 if (!cfg.test && !app.requestSingleInstanceLock()) { app.quit() }
 

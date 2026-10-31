@@ -7,8 +7,8 @@ if (!out) { console.error('Usage : node scripts/publish.js <dossier_de_sortie>')
 const pkg = require('../package.json')
 const dist = path.join(__dirname, '..', 'dist')
 const KINDS = [
-  [/\.AppImage$/, 'linux', 'Linux 64 bits (AppImage — aucun droit administrateur requis)', 'x64', 'portable'],
-  [/\.deb$/, 'linux', 'Linux 64 bits (paquet .deb : Ubuntu, Debian, Mint)', 'x64', 'installer'],
+  [/\.AppImage$/, 'linux', 'Linux 64 bits (AppImage portable, sans installation)', 'x64', 'portable'],
+  [/\.deb$/, 'linux', 'Linux 64 bits (paquet .deb : Ubuntu, Debian, Linux Mint — installation avec raccourci et menu)', 'x64', 'installer'],
   [/-win.*\.exe$/i, 'win32', 'Windows 10 / 11 (installateur avec raccourcis)', 'x64', 'installer'],
   [/-win.*\.zip$/i, 'win32', 'Windows 10 / 11 (archive ZIP, sans installation)', 'x64', 'archive'],
   [/\.dmg$/, 'darwin', 'macOS (Intel et Apple Silicon)', 'universal', 'installer'],
