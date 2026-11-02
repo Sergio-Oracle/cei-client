@@ -9,11 +9,24 @@ const dist = path.join(__dirname, '..', 'dist')
 const KINDS = [
   [/\.AppImage$/, 'linux', 'Linux 64 bits (AppImage portable, sans installation)', 'x64', 'portable'],
   [/\.deb$/, 'linux', 'Linux 64 bits (paquet .deb : Ubuntu, Debian, Linux Mint — installation avec raccourci et menu)', 'x64', 'installer'],
+  [/-win-installateur\.zip$/i, 'win32', 'Windows 10 / 11 (installateur dans une archive ZIP — recommandé avec Microsoft Edge)', 'x64', 'installer-zip'],
   [/-win.*\.exe$/i, 'win32', 'Windows 10 / 11 (installateur avec raccourcis)', 'x64', 'installer'],
   [/-win.*\.zip$/i, 'win32', 'Windows 10 / 11 (archive ZIP, sans installation)', 'x64', 'archive'],
   [/\.dmg$/, 'darwin', 'macOS (Intel et Apple Silicon)', 'universal', 'installer'],
 ]
 fs.mkdirSync(out, { recursive: true })
+// Edge retient un .exe peu connu (« n'est pas fréquemment téléchargé ») mais pas une archive : le même installateur est donc aussi livré dans un ZIP.
+{
+  const setup = fs.readdirSync(dist).find(f => /-win.*-setup\.exe$/i.test(f))
+  if (setup) {
+    const zipPath = path.join(dist, setup.replace(/-setup\.exe$/i, '-installateur.zip'))
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cei-inst-'))
+    fs.copyFileSync(path.join(dist, setup), path.join(tmp, 'Installer CEI Examen.exe'))
+    fs.rmSync(zipPath, { force: true })
+    require('child_process').execFileSync('python3', ['-c', 'import sys,zipfile;z=zipfile.ZipFile(sys.argv[1],"w",zipfile.ZIP_DEFLATED);z.write(sys.argv[2],"Installer CEI Examen.exe");z.close()', zipPath, path.join(tmp, 'Installer CEI Examen.exe')])
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
 const files = []
 for (const f of fs.readdirSync(dist)) {
   const k = KINDS.find(([re]) => re.test(f))
