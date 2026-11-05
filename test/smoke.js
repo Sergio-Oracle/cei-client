@@ -27,7 +27,9 @@ const has = t => events.some(e => e.type === t)
   const sg = await c.sign('NONCE123', 42, 7)
   rep('signature de la poignée de main', sg && /^[0-9a-f]{64}$/.test(sg.sig), JSON.stringify(sg))
   await fetch('/sig', { method: 'POST', body: JSON.stringify({ sig: sg.sig, version: sg.version, platform: sg.platform }) })
-  const en = await c.enterExamMode({ maxMinutes: 60 })
+  rep('signature : l\\'indicateur « session à distance » est fourni au serveur (booléen)', sg && typeof sg.remote === 'boolean', JSON.stringify(sg && sg.remote))
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') window.__gotEsc = true; if (e.key === 'F2') window.__gotF2 = true })
+  const en = await c.enterExamMode({ maxMinutes: 60, examId: 7, userId: 42, allowedSites: [location.origin + '/assist/', 'http://pas-https.example/'], allowedApps: [] })
   rep('mode examen activé', en && en.ok, JSON.stringify(en))
   await wait(300)
   const st = await c.status()
@@ -39,12 +41,26 @@ const has = t => events.some(e => e.type === t)
   // essais pilotés par le processus principal
   const ti = (spec) => window.__ti(spec)
   await window.__test('F12'); await window.__test('ctrl-w'); await wait(300)
+  await window.__testKeys({ type: 'keyDown', keyCode: 'Escape' }); await window.__testKeys({ type: 'keyDown', keyCode: 'F2' }); await wait(400)
+  rep('ÉCHAP n\\'atteint jamais la page pendant l\\'examen (plus de « Revenir à l\\'examen »)', !window.__gotEsc)
+  rep('les touches de fonction (F2…) n\\'atteignent pas la page non plus', !window.__gotF2)
   rep('F12 bloqué et signalé (devtools_attempt)', has('devtools_attempt'))
   rep('Ctrl+W bloqué et signalé', has('client_shortcut_blocked'))
   await window.__testClose(); await wait(300)
   rep('fermeture refusée pendant l\\'examen', has('client_close_attempt'))
   await wait(3500)
-  rep('logiciel interdit détecté', events.some(e => e.type === 'client_forbidden_app' && /teamviewer/.test(e.data.name)), JSON.stringify(events.filter(e=>e.type==='client_forbidden_app')))
+  rep('outil de contrôle à distance (TeamViewer) détecté, signalé ET arrêté', events.some(e => e.type === 'client_forbidden_app' && /teamviewer/.test(e.data.name) && e.data.remote_tool && e.data.killed), JSON.stringify(events.filter(e=>e.type==='client_forbidden_app')))
+  // ── fenêtre d'assistance : seuls les sites choisis pour l'examen, https obligatoire, contenue dans l'application ──
+  const bad1 = await c.openAssist('https://evil.example/'); const bad2 = await c.openAssist('http://pas-https.example/')
+  rep('site non autorisé refusé pour l\\'assistance (et http refusé)', bad1 && !bad1.ok && bad2 && !bad2.ok, JSON.stringify([bad1, bad2]))
+  const as1 = await c.openAssist(location.origin + '/assist/salle'); await wait(1500)
+  const st3 = await c.status()
+  rep('assistance : site autorisé ouvert dans une fenêtre de l\\'application', as1 && as1.ok && st3.assist && has('client_assist_opened'), JSON.stringify([as1, st3.assist]))
+  for (let i = 0; i < 8 && !events.some(e => e.type === 'client_navigation_blocked' && e.data.where === 'assistance'); i++) await wait(500)
+  rep('assistance : la fenêtre ne peut pas aller ailleurs (navigation bloquée et signalée)', events.some(e => e.type === 'client_navigation_blocked' && e.data.where === 'assistance'))
+  const cl2 = await c.closeAssist(); await wait(500); const st4 = await c.status()
+  rep('assistance : fermée à la demande', cl2.ok && !st4.assist && has('client_assist_closed'))
+  await c.openAssist(location.origin + '/assist/salle'); await wait(800)
   await window.__testBlur(); await wait(1200)
   // applications : une fenêtre étrangère apparaît pendant l'examen → fermée aussitôt et signalée
   for (let i = 0; i < 20 && !events.some(e => e.type === 'client_app_closed'); i++) await wait(1000)
@@ -82,24 +98,51 @@ const has = t => events.some(e => e.type === t)
   } catch (e) { rep('WebRTC', false, e.name + ' ' + e.message) }
   rep('notifications autorisées', (await Notification.requestPermission()) === 'granted')
   rep('WebAssembly disponible (détection du visage)', typeof WebAssembly === 'object')
-  const lv = await c.leaveExamMode(); await wait(200)
+  // ── sortie d'urgence : vérifiée par le serveur, jamais en local ──
+  const q1 = await window.__testQuit('00000000')
+  rep('mauvais code : refusé par le serveur, l\\'application reste verrouillée', q1 && !q1.ok && /Code incorrect/.test(q1.message) && (await c.status()).examMode, JSON.stringify(q1))
+  const q0 = await window.__testQuit('')
+  rep('code vide : refusé sans appel au serveur', q0 && !q0.ok)
+  const lv = await c.leaveExamMode(); await wait(300)
   const st2 = await c.status()
   rep('mode examen quitté', lv.ok && st2 && !st2.examMode && !st2.kiosk, JSON.stringify(st2))
+  rep('la sortie du mode examen ferme aussi la fenêtre d\\'assistance', !st2.assist, JSON.stringify(st2))
+  // le dernier essai (bon code) ferme l'application : le rapport part AVANT
   await fetch('/report', { method: 'POST', body: JSON.stringify(out) })
+  await c.enterExamMode({ maxMinutes: 60, examId: 7, userId: 42 })
+  await window.__testQuit('1234-5678')
 })().catch(e => { console.log('ERREUR page: ' + e.message); fetch('/report', { method: 'POST', body: JSON.stringify([{ n: 'erreur page', ok: false, d: e.message }]) }) })
 </script>`
 
 let seenSig = null
+let exitSeen = null, exitBad = 0
+const SECRET = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'secret.json'), 'utf8')).clientSecret } catch { return 'dev-secret-non-securise' } })()
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/assist')) {                       // page d'assistance d'essai : tente de partir ailleurs
+    res.setHeader('content-type', 'text/html; charset=utf-8'); res.end('<!doctype html><title>assist</title>assistance<script>setTimeout(()=>{location.href="https://evil.example/"},600)</script>'); return
+  }
+  if (req.method === 'POST' && req.url === '/api/exam-client/exit') {     // même contrôle que le serveur de production
+    let b = ''; req.on('data', d => b += d); req.on('end', () => {
+      const j = JSON.parse(b); const want = crypto.createHmac('sha256', SECRET).update(`exit|${j.exam_id}|${j.user_id}|${j.code}|${j.ts}|${j.version}|${j.platform}`).digest('hex')
+      const good = want === j.sig && Math.abs(Date.now() - j.ts) < 120000 && /CEIExamClient\/1\./.test(req.headers['user-agent'] || '')
+      res.setHeader('content-type', 'application/json')
+      if (good && String(j.code).replace(/\D/g, '') === '12345678') { exitSeen = j; res.end(JSON.stringify({ ok: true })) }
+      else { exitBad += 1; res.statusCode = 403; res.end(JSON.stringify({ error: good ? 'Code incorrect' : 'Demande refusée.', tries_left: 4 })) }
+    }); return
+  }
   if (req.method === 'POST' && req.url === '/sig') { let b = ''; req.on('data', d => b += d); req.on('end', () => { seenSig = JSON.parse(b); res.end('ok') }); return }
   if (req.method === 'POST' && req.url === '/report') {
-    let b = ''; req.on('data', d => b += d); req.on('end', () => { res.end('ok'); finish(JSON.parse(b)) })
+    let b = ''; req.on('data', d => b += d); req.on('end', () => { res.end('ok'); reported = JSON.parse(b); setTimeout(() => finish(reported), 9000) })
   } else { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(PAGE) }
 })
-let child, fake, done = false
+let child, fake, done = false, reported = null, childExited = false
 function finish(results) {
   if (done) return; done = true
   let fails = 0
+  results.push({ n: 'bon code : signature valide, accepté par le serveur, usage unique côté essai', ok: !!exitSeen && exitBad >= 1, d: JSON.stringify({ exitSeen: !!exitSeen, refusés: exitBad }) })
+  results.push({ n: 'bon code : l\'application se ferme', ok: childExited, d: 'toujours ouverte' })
+  let faked = true; try { process.kill(fake.pid, 0) } catch { faked = false }
+  results.push({ n: 'l\'outil de contrôle à distance a bien été arrêté (processus disparu)', ok: !faked, d: 'toujours en cours' })
   for (const r of results) { if (!r.ok) fails++; console.log((r.ok ? '  ✔ ' : '  ✘ ') + r.n + (r.ok ? '' : '  — ' + r.d)) }
   // Vérification de la signature comme le fait le serveur (même secret que celui embarqué : src/secret.json en essai local)
   if (seenSig) {
@@ -127,5 +170,6 @@ server.listen(0, '127.0.0.1', () => {
   child = spawn('xvfb-run', ['-a', 'sh', '-c', sh, 'cei', ...bin, '--no-sandbox', '--disable-gpu', '--use-fake-device-for-media-stream'], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
   child.stdout.on('data', d => { const t = String(d); if (/PAGE>|Error|Uncaught/.test(t)) process.stdout.write(t) })
   child.stderr.on('data', d => { const s = String(d); if (/Error|Uncaught/i.test(s) && !/dbus|gpu|vaapi|Fontconfig/i.test(s)) process.stderr.write(s) })
+  child.on('exit', () => { childExited = true; if (reported && !done) setTimeout(() => finish(reported), 500) })
   setTimeout(() => { if (!done) { console.log('  ✘ délai dépassé (le client ne répond pas)'); finish([{ n: 'délai', ok: false, d: 'timeout' }]) } }, 120000)
 })

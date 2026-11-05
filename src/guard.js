@@ -4,6 +4,9 @@ const { execFile } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 
+const norm = n => String(n || '').toLowerCase().replace(/\.(exe|app)$/, '').trim()
+let extraAllow = new Set()           // applications épargnées pour CET examen (réglage de l'examen + CEI_ALLOW_APPS)
+
 const FORBIDDEN = new Set([
   // prise de contrôle à distance
   'teamviewer', 'teamviewer_service', 'tv_w32', 'tv_x64', 'anydesk', 'rustdesk', 'ultraviewer', 'ultraviewer_desktop', 'supremo', 'supremoservice',
@@ -16,6 +19,17 @@ const FORBIDDEN = new Set([
   'screenrec', 'snippingtool', 'screenclippinghost', 'kazam', 'simplescreenrecorder', 'peek', 'flameshot', 'spectacle', 'gnome-screenshot',
   // virtualisation hôte
   'vmware', 'vmware-vmx', 'vmplayer', 'virtualbox', 'virtualboxvm', 'vboxsvc', 'qemu-system-x86_64', 'prl_client_app',
+])
+
+// Outils de PRISE DE CONTRÔLE / de BUREAU À DISTANCE : non seulement signalés, mais arrêtés dès qu'ils sont détectés pendant l'examen
+// (un service en arrière-plan n'a pas de fenêtre : le nettoyage des fenêtres ne le verrait pas).
+const REMOTE_TOOLS = new Set([
+  'teamviewer', 'teamviewer_service', 'tv_w32', 'tv_x64', 'teamviewerd', 'anydesk', 'rustdesk', 'ultraviewer', 'ultraviewer_desktop', 'supremo', 'supremoservice',
+  'parsec', 'parsecd', 'vncviewer', 'vncserver', 'winvnc', 'tvnserver', 'tightvnc', 'ultravnc', 'uvnc_service', 'radmin', 'rutserv', 'rfusclient', 'logmein', 'lmiguardiansvc',
+  'splashtop', 'srservice', 'remoting_host', 'remotepc', 'screenconnect.clientservice', 'screenconnect.windowsclient', 'connectwisecontrol.client',
+  'chromoting', 'chrome-remote-desktop-host', 'remoting_desktop', 'x11vnc', 'vino-server', 'krfb', 'xrdp', 'xrdp-sesman', 'x2goagent', 'nxserver', 'nxplayer', 'nxclient',
+  'gotomypc', 'g2mcomm', 'g2mlauncher', 'zohoassist', 'getscreen', 'aa_v3', 'ammyyadmin', 'dwrcs', 'bomgar-scc', 'beyondtrust', 'mstsc', 'rdpclip', 'msra', 'quickassist',
+  'remoteassistance', 'microsoft remote desktop', 'screensharingd', 'ardagent', 'remotemanagementd', 'sunshine', 'moonlight', 'steamstreaming',
 ])
 
 function run(cmd, args, timeout = 6000) {
@@ -33,15 +47,59 @@ async function listProcesses() {
   return out.split('\n').map(l => l.trim().split('/').pop()).filter(Boolean)
 }
 
-/** Noms de logiciels interdits actuellement lancés (sans doublon). */
-async function forbiddenRunning() {
-  const names = await listProcesses()
+/** Noms de logiciels interdits actuellement lancés (sans doublon), hors exceptions autorisées pour cet examen (`setExtraAllow`). */
+async function forbiddenRunning(procs) {
+  const names = procs || await listProcesses()
   const found = new Set()
   for (const raw of names) {
     const n = raw.toLowerCase().replace(/\.(exe|app)$/, '')
-    if (FORBIDDEN.has(n)) found.add(n)
+    if ((FORBIDDEN.has(n) && !extraAllow.has(n)) || REMOTE_TOOLS.has(n)) found.add(n)   // un outil de contrôle à distance n'est jamais épargné
   }
   return [...found]
+}
+
+/** Parmi des noms de processus, ceux qui sont des outils de bureau / contrôle à distance (jamais épargnés, même par une exception d'examen). */
+function remoteToolsIn(names) {
+  const out = new Set()
+  for (const raw of names || []) { const n = norm(raw); if (REMOTE_TOOLS.has(n)) out.add(n) }
+  return [...out]
+}
+
+/** Arrête les outils de contrôle à distance (processus de l'utilisateur ; un service protégé ne s'arrête pas : il reste signalé). Retourne ce qui tourne encore. */
+async function killRemoteTools(names) {
+  for (const n of names) {
+    if (process.platform === 'win32') await run('taskkill', ['/F', '/T', '/IM', n.replace(/[^\w .-]/g, '') + '.exe'], 5000)
+    else await run('pkill', ['-9', '-x', n.replace(/[^\w .-]/g, '')], 4000)
+  }
+  await new Promise(r => setTimeout(r, 600))
+  return remoteToolsIn(await listProcesses())
+}
+
+/** Décision pure (testée) : cet ordinateur est-il utilisé À DISTANCE (l'examen se déroulerait sur une autre machine, vue ou pilotée de loin) ? */
+function remoteFromSignals({ platform, env = {}, procs = [], loginctlRemote = false }) {
+  const names = new Set(procs.map(norm))
+  if (platform === 'win32') {
+    if (/^rdp-/i.test(env.SESSIONNAME || '')) return { remote: true, hint: 'session Bureau à distance Windows (' + env.SESSIONNAME + ')' }
+    if (names.has('rdpclip')) return { remote: true, hint: 'session Bureau à distance Windows (rdpclip)' }
+  } else if (platform === 'darwin') {
+    if (names.has('screensharingd')) return { remote: true, hint: 'partage d\'écran macOS actif' }
+  } else {
+    if (env.XRDP_SESSION) return { remote: true, hint: 'session xrdp' }
+    if (loginctlRemote) return { remote: true, hint: 'session de bureau distante (loginctl)' }
+  }
+  return { remote: false, hint: '' }
+}
+
+async function detectRemoteSession() {
+  try {
+    const procs = await listProcesses()
+    let loginctlRemote = false
+    if (process.platform === 'linux') {
+      const out = await run('loginctl', ['show-session', process.env.XDG_SESSION_ID || 'self', '-p', 'Remote'], 3000)
+      loginctlRemote = /Remote=yes/.test(out)
+    }
+    return remoteFromSignals({ platform: process.platform, env: process.env, procs, loginctlRemote })
+  } catch { return { remote: false, hint: '' } }
 }
 
 const VM_RE = /vmware|virtualbox|vbox|qemu|kvm|hyper-v|xen|parallels|bochs|bhyve|innotek|virtual machine|microsoft corporation virtual/i
@@ -73,8 +131,6 @@ async function detectVM() {
 // ── Applications ouvertes (toutes celles qui ont une fenêtre) ────────────────────────────────────────────────────────────
 // Principe : pendant l'examen, SEULE l'application CEI Examen (et le bureau du système) a le droit d'avoir une fenêtre.
 // Tout le reste — bloc-notes, Claude, ChatGPT, navigateurs (donc aussi un chatbot ouvert dans un onglet), Word, Discord… — est fermé.
-const norm = n => String(n || '').toLowerCase().replace(/\.(exe|app)$/, '').trim()
-
 // Composants du bureau ou d'accessibilité : jamais fermés (fermer le bureau ou un lecteur d'écran n'a aucun sens).
 const SYSTEM_ALLOW = {
   win32: new Set(['explorer', 'dwm', 'csrss', 'winlogon', 'taskhostw', 'sihost', 'ctfmon', 'searchhost', 'searchui', 'searchapp', 'startmenuexperiencehost',
@@ -84,7 +140,6 @@ const SYSTEM_ALLOW = {
   linux: new Set(['gnome-shell', 'plasmashell', 'xfdesktop', 'xfce4-panel', 'cinnamon', 'mate-panel', 'budgie-panel', 'xorg', 'xwayland', 'kwin_x11', 'kwin_wayland',
     'mutter', 'openbox', 'ibus-ui-gtk3', 'orca', 'onboard', 'gnome-session-b', 'cinnamon-session', 'lxpanel', 'pcmanfm-desktop']),
 }
-let extraAllow = new Set()
 function setExtraAllow(list) { extraAllow = new Set((list || []).map(norm)) }
 
 /** Sorties brutes des commandes système → [{ pid, name }] (fonctions pures, testées avec des exemples réels de Windows et macOS). */
@@ -157,4 +212,4 @@ async function closeApps(apps, self, { graceMs = 6000, force = false } = {}) {
   return left
 }
 
-module.exports = { forbiddenRunning, detectVM, listProcesses, listWindowApps, closeApps, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
+module.exports = { forbiddenRunning, remoteToolsIn, killRemoteTools, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }

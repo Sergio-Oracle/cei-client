@@ -9,11 +9,13 @@
  *   • perte de focus (Alt+Tab, menu Démarrer…) : la fenêtre reprend aussitôt le premier plan et l'événement est signalé ;
  *   • écrans supplémentaires recouverts, presse-papiers vidé en continu, capture d'écran masquée (protection du contenu) ;
  *   • logiciels interdits (prise de contrôle à distance, partage/enregistrement d'écran, messageries) et machine virtuelle détectés et signalés ;
- *   • sortie d'urgence uniquement par un code donné par le surveillant.
+ *   • outils de bureau / contrôle à distance arrêtés dès leur détection, session à distance refusée à l'entrée ;
+ *   • sortie d'urgence uniquement par un code ALÉATOIRE, À USAGE UNIQUE, généré pour cet étudiant par le surveillant et vérifié EN LIGNE par le serveur ;
+ *   • fenêtre d'assistance (sites choisis par l'enseignant pour cet examen) : seul canal extérieur toléré, contenu dans l'application.
  * Limite assumée : aucune application ne peut intercepter Ctrl+Alt+Suppr ni la coupure de courant ; tout ce qui peut être fait
  * est fait, et le reste est détecté et tracé côté serveur.
  */
-const { app, BrowserWindow, session, globalShortcut, screen, clipboard, ipcMain, Menu, desktopCapturer, systemPreferences } = require('electron')
+const { app, BrowserWindow, session, globalShortcut, screen, clipboard, ipcMain, Menu, desktopCapturer, systemPreferences, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
@@ -40,7 +42,9 @@ const pending = []                       // événements en attente tant que la 
 let pageReady = false
 const timers = []
 let globalOk = []
-const exam = { active: false, since: 0, maxTimer: null, blurAt: 0, lastShortcutAt: 0, forbiddenSeen: new Map(), quitTries: 0 }
+const exam = { active: false, since: 0, maxTimer: null, blurAt: 0, lastShortcutAt: 0, forbiddenSeen: new Map(), remoteSeen: false, lastFocus: 'main',
+  examId: 0, userId: 0, allowedSites: [], allowedApps: [] }
+let assistWin = null
 
 // Lien « Ouvrir dans l'application » depuis la plateforme : ceiexamen://exam/<id>
 const PROTO = 'ceiexamen'
@@ -55,6 +59,18 @@ const selfIdentity = () => {
   const pids = new Set([process.pid, process.ppid])
   try { for (const m of app.getAppMetrics()) pids.add(m.pid) } catch { /* avant ready */ }
   return { names, pids }
+}
+// Sites d'assistance : https obligatoire (http seulement vers 127.0.0.1 pour les essais automatiques)
+const okAssistUrl = u => { try { const x = new URL(u); return x.protocol === 'https:' || (cfg.test && x.protocol === 'http:' && x.hostname === '127.0.0.1') } catch { return false } }
+const sameHost = (a, b) => { try { return new URL(a).hostname === new URL(b).hostname } catch { return false } }
+const assistAllowedHost = h => exam.allowedSites.some(s => { try { return new URL(s).hostname === h } catch { return false } })
+/** Réglages de l'examen donnés par la page (identité, sites d'assistance, applications tolérées) : validés ici, jamais crus tels quels. */
+function applyExamConfig(o = {}) {
+  if (Number.isInteger(o.examId) && o.examId > 0) exam.examId = o.examId
+  if (Number.isInteger(o.userId) && o.userId > 0) exam.userId = o.userId
+  if (Array.isArray(o.allowedSites)) exam.allowedSites = o.allowedSites.map(String).filter(okAssistUrl).slice(0, 5)
+  if (Array.isArray(o.allowedApps)) exam.allowedApps = o.allowedApps.map(x => String(x).slice(0, 60)).slice(0, 10)
+  guard.setExtraAllow([...cfg.allowApps, ...exam.allowedApps])
 }
 const isAllowed = u => { try { const h = new URL(u).hostname; return cfg.allowedHosts.some(a => h === a || h.endsWith('.' + a)) } catch { return false } }
 const logFile = () => path.join(app.getPath('userData'), 'client.log')
@@ -110,7 +126,9 @@ function onInput(event, input) {
   const ctrl = input.control || input.meta
   const devtools = k === 'f12' || (ctrl && input.shift && ['i', 'j', 'c'].includes(k))
   const block = devtools
-    || ['f5', 'f11', 'f1', 'f3', 'f6', 'f7', 'f10'].includes(k)
+    || /^f([1-9]|1[0-9]|2[0-4])$/.test(k)                       // toutes les touches de fonction
+    || k === 'escape'                                            // Échap : sortirait du plein écran de la page (« Revenir à l'examen »)
+    || (input.alt && (k === ' ' || k === 'space'))               // menu système de la fenêtre
     || (ctrl && !input.shift && !input.alt && ['w', 'q', 'r', 'n', 't', 'p', 's', 'u', 'o', 'l', 'f', 'g', 'h', 'j', 'd', 'e', 'k', 'b', '+', '-', '=', '0', 'tab'].includes(k))
     || (ctrl && input.shift && ['r', 'n', 't', 'w', 'p', 'delete', 'o', 'b'].includes(k))
     || (input.alt && ['f4', 'arrowleft', 'arrowright', 'home', 'd', 'tab', 'escape'].includes(k))
@@ -155,12 +173,18 @@ function startWatchers() {
   const every = (ms, fn) => timers.push(setInterval(() => { try { fn() } catch (e) { log('ERR watcher', e.message) } }, ms))
   every(400, () => {                                         // reprise du premier plan
     if (!exam.active || !win || win.isDestroyed()) return
-    if (!win.isFocused() || exam.forceBlur) {
+    const live = w => w && !w.isDestroyed()
+    if (win.isFocused()) exam.lastFocus = 'main'
+    if (live(assistWin) && assistWin.isFocused()) exam.lastFocus = 'assist'
+    const inOurWindow = (live(assistWin) && assistWin.isFocused()) || (live(quitWin) && quitWin.isFocused())   // fenêtre d'assistance / saisie du code : tolérées
+    if ((!win.isFocused() && !inOurWindow) || exam.forceBlur) {
       exam.forceBlur = false
       const now = Date.now()
       if (now - exam.blurAt > 2500) { exam.blurAt = now; report('window_blur', { via: 'client' }) }
-      win.show(); win.focus(); win.moveTop(); win.setAlwaysOnTop(true, 'screen-saver')
+      const back = exam.lastFocus === 'assist' && live(assistWin) ? assistWin : win
+      back.show(); back.focus(); back.moveTop(); back.setAlwaysOnTop(true, 'screen-saver')
     }
+    if (live(assistWin) && !assistWin.isVisible()) assistWin.show()
   })
   every(1500, () => { if (exam.active) clipboard.clear() })  // rien d'extérieur ne peut être collé
   let sweeping = false
@@ -180,10 +204,16 @@ function startWatchers() {
   })
   every(cfg.scanMs, async () => {
     if (!exam.active) return
-    for (const name of await guard.forbiddenRunning()) {
+    const procs = await guard.listProcesses()
+    const remote = guard.remoteToolsIn(procs)
+    let still = []
+    if (remote.length) still = await guard.killRemoteTools(remote)                                  // arrêtés aussitôt, pas seulement signalés
+    for (const name of await guard.forbiddenRunning(procs)) {
       const last = exam.forbiddenSeen.get(name) || 0
-      if (Date.now() - last > 5 * 60 * 1000) { exam.forbiddenSeen.set(name, Date.now()); report('client_forbidden_app', { name }) }
+      if (Date.now() - last > 5 * 60 * 1000) { exam.forbiddenSeen.set(name, Date.now()); report('client_forbidden_app', { name, remote_tool: remote.includes(name), killed: remote.includes(name) && !still.includes(name) }) }
     }
+    const rs = await guard.detectRemoteSession()
+    if (rs.remote && !exam.remoteSeen) { exam.remoteSeen = true; report('client_remote_session', { hint: rs.hint }) }
   })
 }
 app.whenReady().then(() => {
@@ -192,15 +222,21 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', coverOtherDisplays)
 })
 
-function enterExamMode({ maxMinutes = 240 } = {}) {
+function enterExamMode(opts = {}) {
+  const { maxMinutes = 240 } = opts
+  applyExamConfig(opts)
   if (exam.active || !win) return { ok: true, already: true }
-  exam.active = true; exam.since = Date.now(); exam.forbiddenSeen.clear()
+  exam.active = true; exam.since = Date.now(); exam.forbiddenSeen.clear(); exam.remoteSeen = false
   try { win.setKiosk(true) } catch { win.setFullScreen(true) }
   const tryDo = fn => { try { fn() } catch { /* option non disponible sur ce système */ } }
   tryDo(() => win.setAlwaysOnTop(true, 'screen-saver'))
   tryDo(() => win.setContentProtection(true))             // capture / enregistrement d'écran : fenêtre noire
   tryDo(() => win.setMinimizable(false)); tryDo(() => win.setResizable(false)); tryDo(() => win.setMovable(false)); tryDo(() => win.setClosable(false))
   win.focus(); clipboard.clear()
+  // Aucun moyen de rester en fenêtre normale : si le plein écran est quitté par n'importe quelle voie, il est rétabli aussitôt
+  win.removeAllListeners('leave-full-screen'); win.removeAllListeners('hide')
+  win.on('leave-full-screen', () => { if (exam.active && win && !win.isDestroyed()) { try { win.setKiosk(true) } catch { win.setFullScreen(true) } } })
+  win.on('hide', () => { if (exam.active && win && !win.isDestroyed()) win.show() })
   registerGlobalShortcuts(); startWatchers(); coverOtherDisplays()
   clearTimeout(exam.maxTimer)
   exam.maxTimer = setTimeout(() => { report('client_exam_mode_timeout'); leaveExamMode() }, (Math.max(5, Math.min(600, maxMinutes)) + 15) * 60000)   // jamais d'élève prisonnier
@@ -212,6 +248,9 @@ function leaveExamMode() {
   if (!exam.active) return { ok: true }
   exam.active = false
   clearTimeout(exam.maxTimer)
+  closeAssist()
+  exam.allowedSites = []; exam.allowedApps = []; guard.setExtraAllow(cfg.allowApps)      // les exceptions n'existent que le temps de l'examen
+  if (win && !win.isDestroyed()) { win.removeAllListeners('leave-full-screen'); win.removeAllListeners('hide') }
   timers.splice(0).forEach(clearInterval)
   try { globalShortcut.unregisterAll() } catch { /* rien */ }
   covers.splice(0).forEach(w => { try { w.destroy() } catch { /* rien */ } })
@@ -232,14 +271,61 @@ function openQuitPrompt() {
   quitWin.setMenu(null)
   quitWin.loadFile(path.join(__dirname, 'quit.html'))
 }
-ipcMain.handle('cei:quit-code', (_e, code) => {
-  if (!cfg.quitHash) return { ok: false, message: "Aucun code de sortie n'est configuré sur ce poste." }
-  exam.quitTries += 1
-  const ok = crypto.createHash('sha256').update(String(code || '')).digest('hex') === cfg.quitHash
-  if (!ok) { report('client_quit_code_failed', { tries: exam.quitTries }); return { ok: false, message: exam.quitTries >= 3 ? 'Code incorrect — le surveillant est prévenu.' : 'Code incorrect' } }
-  report('client_quit_code_used'); allowQuit = true; leaveExamMode(); setTimeout(() => app.quit(), 300)
+async function submitQuitCode(code) {
+  // Hors examen verrouillé : rien à débloquer
+  if (!exam.active) { allowQuit = true; setTimeout(() => app.quit(), 200); return { ok: true } }
+  if (!exam.examId || !exam.userId) return { ok: false, message: "Identité de l'examen inconnue : redémarrez l'examen ou contactez le surveillant." }
+  const typed = String(code || '').trim()
+  if (!/\d/.test(typed)) return { ok: false, message: 'Saisissez le code à 8 chiffres donné par le surveillant.' }
+  const ts = Date.now()
+  const sig = crypto.createHmac('sha256', cfg.clientSecret).update(`exit|${exam.examId}|${exam.userId}|${typed}|${ts}|${cfg.version}|${process.platform}`).digest('hex')
+  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 12000)
+  try {
+    const r = await net.fetch(new URL('/api/exam-client/exit', cfg.url).toString(), {
+      method: 'POST', signal: ctl.signal,
+      headers: { 'Content-Type': 'application/json', 'User-Agent': `CEIExamClient/${cfg.version}` },
+      body: JSON.stringify({ exam_id: exam.examId, user_id: exam.userId, code: typed, ts, version: cfg.version, platform: process.platform, sig }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (r.ok && j.ok) { log('QUIT code accepté par le serveur'); allowQuit = true; leaveExamMode(); setTimeout(() => app.quit(), 300); return { ok: true } }
+    log('QUIT refusé', r.status)
+    const left = typeof j.tries_left === 'number' ? ` (${j.tries_left} essai${j.tries_left > 1 ? 's' : ''} restant${j.tries_left > 1 ? 's' : ''})` : ''
+    return { ok: false, message: (j.error || 'Code refusé') + left }
+  } catch {
+    return { ok: false, message: "Le serveur est injoignable : le code ne peut pas être vérifié. Réessayez dès que la connexion revient. Le verrouillage se lève de lui-même à la fin de l'examen." }
+  } finally { clearTimeout(to) }
+}
+ipcMain.handle('cei:quit-code', (_e, code) => submitQuitCode(code))
+
+// ── Fenêtre d'assistance : sites choisis par l'enseignant pour CET examen, contenus dans l'application ──────────────────────
+function openAssist(url) {
+  if (!exam.active || !win) return { ok: false, message: "L'assistance n'est disponible que pendant l'examen." }
+  const entry = exam.allowedSites.find(s => sameHost(s, url) && (new URL(url).pathname.startsWith(new URL(s).pathname) || new URL(s).pathname === '/'))
+  if (!entry) return { ok: false, message: "Ce site n'est pas autorisé pour cet examen." }
+  if (assistWin && !assistWin.isDestroyed()) { assistWin.show(); assistWin.focus(); return { ok: true, already: true } }
+  const host = new URL(entry).hostname
+  assistWin = new BrowserWindow({
+    width: 1100, height: 760, parent: win, modal: false, title: `Assistance technique — ${host}`, autoHideMenuBar: true, alwaysOnTop: true, minimizable: false, fullscreenable: false,
+    backgroundColor: '#ffffff', icon: path.join(__dirname, 'icon.png'),
+    webPreferences: { partition: 'cei-assist', contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: false, spellcheck: false, webSecurity: true },
+  })
+  assistWin.setMenu(null)
+  try { assistWin.setAlwaysOnTop(true, 'screen-saver'); assistWin.setContentProtection(true) } catch { /* option indisponible */ }
+  const as = assistWin.webContents.session
+  const okPermA = new Set(['media', 'display-capture', 'fullscreen', 'clipboard-sanitized-write', 'speaker-selection', 'notifications'])
+  as.setPermissionRequestHandler((wc, perm, cb) => { let h = ''; try { h = new URL(wc.getURL()).hostname } catch { /* adresse illisible */ } cb(okPermA.has(perm) && assistAllowedHost(h)) })
+  as.setPermissionCheckHandler((wc, perm) => okPermA.has(perm))
+  as.setDisplayMediaRequestHandler(async (_r, cb) => { try { const src = await desktopCapturer.getSources({ types: ['screen'] }); cb(src[0] ? { video: src[0] } : {}) } catch { cb({}) } })
+  assistWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  const guardA = (e, u) => { let h = ''; try { h = new URL(u).hostname } catch { /* adresse illisible */ } if (!assistAllowedHost(h) || !okAssistUrl(u)) { e.preventDefault(); report('client_navigation_blocked', { url: String(u).slice(0, 200), where: 'assistance' }) } }
+  assistWin.webContents.on('will-navigate', guardA); assistWin.webContents.on('will-redirect', guardA)
+  assistWin.webContents.on('before-input-event', (ev, input) => { if (input.type === 'keyDown' && /^f12$/i.test(input.key || '')) ev.preventDefault() })
+  assistWin.on('closed', () => { assistWin = null; exam.lastFocus = 'main'; report('client_assist_closed', { host }); if (win && !win.isDestroyed()) { win.focus() } })
+  assistWin.loadURL(url)
+  report('client_assist_opened', { host })
   return { ok: true }
-})
+}
+function closeAssist() { if (assistWin && !assistWin.isDestroyed()) { try { assistWin.destroy() } catch { /* déjà fermée */ } } assistWin = null }
 
 // ── Pont avec la page CEI (uniquement depuis un site autorisé) ───────────────────────────────────────────────────────────────
 const fromAllowed = e => { try { return isAllowed(e.senderFrame.url) } catch { return false } }
@@ -257,12 +343,13 @@ ipcMain.handle('cei:ask-media', async e => {
   }
   return mediaAccess()
 })
-ipcMain.handle('cei:status', e => fromAllowed(e) ? { examMode: exam.active, media: mediaAccess(), displays: screen.getAllDisplays().length, focused: !!(win && win.isFocused()), kiosk: !!(win && win.isKiosk()), shortcuts: globalOk, vm: vmInfo.vm } : null)
-ipcMain.handle('cei:sign', (e, { nonce, userId, examId } = {}) => {
+ipcMain.handle('cei:status', e => fromAllowed(e) ? { examMode: exam.active, assist: !!(assistWin && !assistWin.isDestroyed()), media: mediaAccess(), displays: screen.getAllDisplays().length, focused: !!(win && win.isFocused()), kiosk: !!(win && win.isKiosk()), shortcuts: globalOk, vm: vmInfo.vm } : null)
+ipcMain.handle('cei:sign', async (e, { nonce, userId, examId } = {}) => {
   if (!fromAllowed(e) || !nonce) return null
   const msg = `${nonce}|${userId}|${cfg.version}|${process.platform}`
   const sig = crypto.createHmac('sha256', cfg.clientSecret).update(msg).digest('hex')
-  return { sig, version: cfg.version, platform: process.platform, vm: vmInfo.vm, vm_hint: vmInfo.hint, examId }
+  const rs = await guard.detectRemoteSession()
+  return { sig, version: cfg.version, platform: process.platform, vm: vmInfo.vm, vm_hint: vmInfo.hint, remote: rs.remote, remote_hint: rs.hint, examId }
 })
 ipcMain.handle('cei:apps', async e => fromAllowed(e) ? { apps: [...new Map((await guard.listWindowApps(selfIdentity())).map(a => [a.name, a])).values()].map(a => ({ name: a.name })) } : null)
 ipcMain.handle('cei:apps-close', async e => {
@@ -274,11 +361,15 @@ ipcMain.handle('cei:apps-close', async e => {
   return { closed: apps.length - left.length, remaining: [...new Set(left.map(a => a.name))].map(name => ({ name })) }
 })
 ipcMain.handle('cei:enter', (e, opts) => fromAllowed(e) ? enterExamMode(opts) : { ok: false })
+ipcMain.handle('cei:configure', (e, opts) => { if (!fromAllowed(e)) return { ok: false }; applyExamConfig(opts || {}); return { ok: true } })
+ipcMain.handle('cei:assist-open', (e, url) => fromAllowed(e) ? openAssist(String(url || '')) : { ok: false })
+ipcMain.handle('cei:assist-close', e => { if (!fromAllowed(e)) return { ok: false }; closeAssist(); return { ok: true } })
 ipcMain.handle('cei:leave', e => fromAllowed(e) ? leaveExamMode() : { ok: false })
 
 if (cfg.test) {                                           // uniquement pour les essais automatiques
   ipcMain.handle('cei:test-input', (_e, spec) => { win.webContents.sendInputEvent(spec); return true })
   ipcMain.handle('cei:test-blur', () => { exam.forceBlur = true; return true })
+  ipcMain.handle('cei:test-quit', (_e, code) => submitQuitCode(code))
   ipcMain.handle('cei:test-close', () => { win.close(); return !!(win && !win.isDestroyed()) })
 }
 

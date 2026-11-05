@@ -20,8 +20,7 @@ module.exports = {
   allowedHosts: [host, ...extra],
   // Secret partagé avec le serveur (variable CEI_CLIENT_SECRET) : signe la poignée de main « je suis bien le client officiel ».
   clientSecret: secret.clientSecret || process.env.CEI_CLIENT_SECRET || 'dev-secret-non-securise',
-  // Empreinte SHA-256 du code de sortie d'urgence (donné par le surveillant). Vide = sortie d'urgence désactivée.
-  quitHash: secret.quitHash || process.env.CEI_QUIT_HASH || '',
+  // Plus de code de sortie embarqué (depuis 1.2.0) : le code est généré par le serveur pour un étudiant et un examen, à usage unique, vérifié en ligne.
   // Applications autorisées à rester ouvertes pendant l'examen (en plus du bureau du système) : accessibilité, besoins particuliers…
   allowApps: (process.env.CEI_ALLOW_APPS || '').split(',').map(s => s.trim()).filter(Boolean),
   appsMs: parseInt(process.env.CEI_APPS_MS || '4000', 10),

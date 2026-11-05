@@ -1,10 +1,19 @@
 <!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Code de sortie</title>
 <style>body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh}
-.box{width:340px}h1{font-size:18px;margin:0 0 10px}input{width:100%;padding:11px;border-radius:8px;border:1px solid #475569;background:#1e293b;color:#fff;font-size:16px;box-sizing:border-box}
-button{margin-top:12px;width:100%;padding:11px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-size:16px;font-weight:600;cursor:pointer}#m{margin-top:10px;color:#fca5a5;font-size:14px;min-height:18px}</style></head>
-<body><div class="box"><h1>Code de sortie d'urgence</h1><input id="c" type="password" autofocus placeholder="Code donné par le surveillant"><button id="b">Quitter</button><div id="m"></div></div>
+.box{width:360px}h1{font-size:18px;margin:0 0 6px}p{margin:0 0 12px;font-size:13px;color:#94a3b8;line-height:1.4}
+input{width:100%;padding:11px;border-radius:8px;border:1px solid #475569;background:#1e293b;color:#fff;font-size:22px;letter-spacing:4px;text-align:center;box-sizing:border-box}
+button{margin-top:12px;width:100%;padding:11px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-size:16px;font-weight:600;cursor:pointer}button:disabled{opacity:.5;cursor:wait}#m{margin-top:10px;color:#fca5a5;font-size:14px;min-height:36px}</style></head>
+<body><div class="box"><h1>Code de sortie d'urgence</h1>
+<p>Code à 8 chiffres, généré pour vous par le surveillant : valable 15 minutes, utilisable une seule fois. Il est vérifié par le serveur.</p>
+<input id="c" inputmode="numeric" autocomplete="off" maxlength="9" autofocus placeholder="0000-0000"><button id="b">Quitter l'application</button><div id="m"></div></div>
 <script>
 const {ipcRenderer}=require('electron')
-const go=async()=>{const r=await ipcRenderer.invoke('cei:quit-code',document.getElementById('c').value);if(!r.ok)document.getElementById('m').textContent=r.message||'Code incorrect'}
-document.getElementById('b').onclick=go;document.getElementById('c').addEventListener('keydown',e=>{if(e.key==='Enter')go()})
+const m=document.getElementById('m'),b=document.getElementById('b'),c=document.getElementById('c')
+const go=async()=>{
+  b.disabled=true;m.style.color='#94a3b8';m.textContent='Vérification par le serveur…'
+  const r=await ipcRenderer.invoke('cei:quit-code',c.value)
+  b.disabled=false
+  if(!r.ok){m.style.color='#fca5a5';m.textContent=r.message||'Code refusé';c.select()}
+}
+b.onclick=go;c.addEventListener('keydown',e=>{if(e.key==='Enter')go()})
 </script></body></html>
