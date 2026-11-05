@@ -1,0 +1,42 @@
+# Construit UNIQUEMENT le paquet macOS (universel : Intel + Apple Silicon) sur une machine Mac prêtée par GitHub.
+# Le dépôt étant PUBLIC, le résultat (qui contient le secret de l'application) n'est PAS mis en « Artifacts »
+# (téléchargeables par tout compte GitHub) : il est déposé dans une VERSION BROUILLON, visible des seuls
+# collaborateurs du dépôt. Après récupération des fichiers, supprimer le brouillon (onglet Releases).
+#
+# Secrets à créer une fois (Settings → Secrets and variables → Actions) : CEI_CLIENT_SECRET, CEI_QUIT_HASH
+# Lancer : onglet Actions → « Construire CEI Examen (macOS) » → Run workflow
+name: Construire CEI Examen (macOS)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci --no-audit --no-fund
+      - name: Secrets embarqués (jamais dans le dépôt)
+        run: |
+          node -e "
+          const fs=require('fs');
+          if(!process.env.S||!process.env.Q){console.error('Secrets CEI_CLIENT_SECRET / CEI_QUIT_HASH manquants');process.exit(1)}
+          fs.writeFileSync('src/secret.json',JSON.stringify({clientSecret:process.env.S,quitHash:process.env.Q}))"
+        env:
+          S: ${{ secrets.CEI_CLIENT_SECRET }}
+          Q: ${{ secrets.CEI_QUIT_HASH }}
+      - run: node test/unit.js
+      - name: Construction macOS universelle
+        run: npx electron-builder --mac dmg zip --universal --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # pas de certificat de signature : voir README
+      - name: Dépôt dans une version brouillon (privée aux collaborateurs)
+        run: |
+          ls -lh dist/*.dmg dist/*.zip
+          gh release create "mac-build-${{ github.run_id }}" dist/*.dmg dist/*.zip --draft \
+            --title "Construction macOS ${{ github.run_id }} (brouillon, contient le secret : à supprimer après récupération)" \
+            --notes "Fichiers macOS de CEI Examen. Brouillon visible des seuls collaborateurs. À supprimer après téléchargement."
+        env:
+          GH_TOKEN: ${{ github.token }}

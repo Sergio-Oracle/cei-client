@@ -47,7 +47,7 @@ if (!args.includes('--skip-tests')) run('node', ['test/unit.js'])
 
 fs.rmSync(path.join(root, 'dist'), { recursive: true, force: true })
 for (const t of wanted) {
-  const flags = { linux: ['--linux', 'AppImage', 'deb'], win: ['--win', 'zip'], mac: ['--mac', 'dmg', 'zip'] }[t]
+  const flags = { linux: ['--linux', 'AppImage', 'deb'], win: ['--win', 'zip'], mac: ['--mac', 'dmg', 'zip', '--universal'] }[t]
   run('npx', ['electron-builder', ...flags])
   if (t === 'win') {                                          // icône CEI dans le .exe (sans Wine), puis ZIP refait avec le .exe corrigé
     run('node', ['scripts/set-win-icon.js'])
