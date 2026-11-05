@@ -21,6 +21,14 @@ if [ ! -s src/secret.json ]; then
 fi
 echo "secret embarqué : présent"
 
+# Les outils de construction (electron-builder 26) demandent Node 18, qui ne tourne que sur macOS 10.15 ou plus
+MINOR="$(echo "$MACOS" | cut -d. -f2)"
+if [ "$MAJOR" -eq 10 ] && [ "${MINOR:-0}" -lt 15 ]; then
+  echo "✘ macOS $MACOS est trop ancien : il faut macOS 10.15 (Catalina) ou plus récent pour construire."
+  echo "  Alternative sans Mac récent : GitHub Actions (voir README, « Sans Mac »)."
+  exit 1
+fi
+
 node_ok() { command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]; }
 if ! node_ok; then
   # Node 20 demande macOS 11 ou plus ; Node 18 fonctionne dès macOS 10.15
