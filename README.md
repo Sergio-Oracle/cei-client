@@ -13,7 +13,10 @@ Application Electron qui ouvre la plateforme CEI et, pendant un examen, **prend 
 | Capture d'écran | protection du contenu activée (fenêtre noire sur les captures / enregistrements) |
 | Logiciels interdits | contrôle toutes les 20 s : contrôle à distance, partage / enregistrement d'écran, messageries (`client_forbidden_app`) |
 | Machine virtuelle | détectée au démarrage (`client_vm_detected`) |
-| Sortie d'urgence | uniquement par un code donné par le surveillant (Ctrl+Maj+Alt+Q) |
+| Touches | Échap, toutes les touches de fonction (F1–F24) et Alt+Espace n'atteignent jamais la page : plus de « Revenir à l'examen » provoqué par une touche |
+| Bureau / contrôle à distance | TeamViewer, AnyDesk, RustDesk, VNC, Bureau à distance Windows (mstsc, rdpclip), Assistance rapide, partage d'écran macOS… **arrêtés dès leur détection** ; session à distance (RDP, xrdp, partage d'écran) **refusée à l'entrée** de l'examen |
+| Assistance technique | sites choisis par l'enseignant pour CET examen (ex. Teranga Meet, Jokko Meet), ouverts dans une fenêtre de l'application qui ne peut pas aller ailleurs ; chaque ouverture est signalée |
+| Sortie d'urgence | uniquement par un code **aléatoire, à usage unique**, généré pour CET étudiant par le surveillant (bouton clé de l'écran de surveillance), **vérifié par le serveur** (Ctrl+Maj+Alt+Q) |
 | Poignée de main | signature HMAC avec un secret embarqué ; le serveur refuse le démarrage sans elle (`require_client`) |
 
 **Limites assumées** : aucune application ne peut intercepter Ctrl+Alt+Suppr ni la coupure de courant ; l'extraction du secret embarqué par un
@@ -39,6 +42,15 @@ Prérequis une seule fois : Node.js 20+, puis `cd /root/cei-client && npm instal
 
 Les fichiers construits sont dans `dist/`. `node scripts/build.js --help` rappelle toutes les options.
 
+**Code de sortie d'urgence (depuis 1.2.0).** Il n'y a plus de code unique embarqué dans l'application : un surveillant (affecté à l'étudiant), l'enseignant ou un administrateur
+génère un code de 8 chiffres pour un étudiant précis (`POST /api/exam_attempts/<id>/client_exit_code`) ; l'application l'envoie au serveur (`POST /api/exam-client/exit`, signé du secret et horodaté)
+qui compare une empreinte, détruit le code à la première réussite (usage unique), le détruit aussi après 5 essais ratés ou 15 minutes, et journalise tout (`client_exit_code_issued`,
+`client_quit_code_used`, `client_quit_code_failed`). Sans connexion au serveur le code ne peut pas être vérifié : le verrouillage se lève alors de lui-même à la fin de l'examen (durée + 15 min).
+Pour retirer toute possibilité de sortie par l'ancien code des versions 1.1.x, montez `CEI_CLIENT_MIN_VERSION=1.2.0` dans le `.env` de l'API.
+
+**Réglages par examen** (création de l'examen ou *Paramètres*, quand l'application est exigée) : sites d'assistance (https, 5 au plus), applications tolérées (noms de programmes ; jamais un outil de
+contrôle à distance), refus des machines virtuelles. Ils sont validés par le serveur (`services/exam_settings.py`) et transmis à l'application au démarrage de l'examen.
+
 **Le secret** (`src/secret.json`) est créé une seule fois et **conservé** : le régénérer (`node scripts/make-secret.js --force`) rend INVALIDES toutes
 les applications déjà installées, qu'il faudrait réinstaller. La même valeur doit être sur le serveur (`CEI_CLIENT_SECRET`, voir `build/server.env`).
 
@@ -50,7 +62,7 @@ Un paquet macOS ne peut être produit que par un Mac. Trois façons de l'obtenir
 
 1. **GitHub Actions (recommandé, gratuit ou presque)** : GitHub prête une machine macOS le temps de la construction.
    Le fichier `.github/workflows/build.yml` construit Windows, macOS et Linux d'un coup.
-   Une fois : poussez ce dossier sur un dépôt GitHub, ajoutez les deux secrets `CEI_CLIENT_SECRET` et `CEI_QUIT_HASH` (explications en tête du fichier).
+   Une fois : poussez ce dossier sur un dépôt GitHub, ajoutez les deux secrets `CEI_CLIENT_SECRET` et `CEI_QUIT_HASH` (conservé pour la compatibilité du fichier, plus utilisé par l'application depuis 1.2.0) (explications en tête du fichier).
    À chaque version : onglet *Actions* → *Construire CEI Examen* → *Run workflow*, puis téléchargez les fichiers dans *Artifacts*.
    Les dépôts publics sont gratuits ; les dépôts privés consomment le quota mensuel (une construction macOS compte environ 10 fois sa durée).
 2. **Mac loué à l'heure** (MacStadium, AWS EC2 Mac, MacinCloud) : vous vous connectez, lancez `npm run build:mac`, récupérez le `.dmg`.
