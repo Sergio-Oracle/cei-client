@@ -36,5 +36,23 @@ for (const f of fs.readdirSync(dist)) {
   fs.copyFileSync(src, dst)
   files.push({ name: safe, platform: k[1], arch: k[3] || '', kind: k[4] || '', label: k[2], sha256: crypto.createHash('sha256').update(fs.readFileSync(dst)).digest('hex') })
 }
-fs.writeFileSync(path.join(out, 'latest.json'), JSON.stringify({ version: pkg.version, files, notes: '' }, null, 2))
-console.log(`${files.length} fichier(s) publiés dans ${out} (version ${pkg.version}).`)
+// Fichiers de MISE À JOUR AUTOMATIQUE (src/updater.js) : installateur Windows silencieux, AppImage, archive macOS. Signés avec le secret embarqué
+// dans l'application : un fichier déposé sur le serveur sans ce secret n'est jamais installé par un poste.
+let secret = ''
+try { secret = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'secret.json'), 'utf8')).clientSecret } catch { /* sans secret : pas de mise à jour automatique */ }
+const UPD = [
+  [/-win-setup\.exe$/i, 'win32', 'x64', 'nsis'],
+  [/\.AppImage$/, 'linux', 'x64', 'appimage'],
+  [/-universal-mac\.zip$|-mac\.zip$/, 'darwin', 'universal', 'mac-zip'],
+]
+const updates = []
+for (const f of fs.readdirSync(dist)) {
+  const k = UPD.find(([re]) => re.test(f)); if (!k || !secret) continue
+  if (k[3] === 'mac-zip' && !/universal|mac/i.test(f)) continue
+  const safe = f.replace(/\s+/g, '-'), dst = path.join(out, safe)
+  if (!fs.existsSync(dst)) fs.copyFileSync(path.join(dist, f), dst)            // l'archive macOS n'est pas une « version à télécharger » à la main : elle ne sert qu'à la mise à jour
+  const sha256 = crypto.createHash('sha256').update(fs.readFileSync(dst)).digest('hex')
+  updates.push({ name: safe, platform: k[1], arch: k[2], mode: k[3], sha256, sig: crypto.createHmac('sha256', secret).update(`update|${pkg.version}|${safe}|${sha256}`).digest('hex') })
+}
+fs.writeFileSync(path.join(out, 'latest.json'), JSON.stringify({ version: pkg.version, files, updates, notes: '' }, null, 2))
+console.log(`${files.length} fichier(s) publiés dans ${out} (version ${pkg.version}) ; ${updates.length} fichier(s) de mise à jour automatique signés.`)

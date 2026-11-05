@@ -27,4 +27,10 @@ module.exports = {
   devtools: process.env.CEI_DEVTOOLS === '1',
   test: process.env.CEI_TEST === '1',
   scanMs: parseInt(process.env.CEI_SCAN_MS || '20000', 10),
+  // Mise à jour automatique (jamais pendant un examen) : liste des versions publiée par le serveur, vérifiée au démarrage puis toutes les 30 min
+  releasesUrl: new URL('/api/exam-client/releases', url).toString(),
+  updateEveryMs: parseInt(process.env.CEI_UPDATE_EVERY_MS || String(30 * 60 * 1000), 10),
+  updateJitterMs: parseInt(process.env.CEI_UPDATE_JITTER_MS || '15000', 10),
+  noUpdate: process.env.CEI_NO_UPDATE === '1',
+  updateTest: process.env.CEI_UPDATE_TEST === '1',       // essais : autorise la mise à jour d'une application non empaquetée
 }

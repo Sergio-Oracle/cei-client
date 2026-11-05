@@ -15,12 +15,14 @@
  * Limite assumée : aucune application ne peut intercepter Ctrl+Alt+Suppr ni la coupure de courant ; tout ce qui peut être fait
  * est fait, et le reste est détecté et tracé côté serveur.
  */
-const { app, BrowserWindow, session, globalShortcut, screen, clipboard, ipcMain, Menu, desktopCapturer, systemPreferences, net } = require('electron')
+const { app, BrowserWindow, session, globalShortcut, screen, clipboard, ipcMain, Menu, desktopCapturer, systemPreferences, net, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
 const cfg = require('./config')
 const guard = require('./guard')
+const updater = require('./updater')
+const { spawn } = require('child_process')
 
 app.userAgentFallback = `${app.userAgentFallback} CEIExamClient/${cfg.version}`
 // AppImage sur Ubuntu 23.10+ / systèmes restreignant les espaces de noms utilisateurs : le bac à sable de Chromium ne peut pas démarrer
@@ -260,6 +262,7 @@ function leaveExamMode() {
     tryDo(() => win.setMinimizable(true)); tryDo(() => win.setResizable(true)); tryDo(() => win.setMovable(true)); tryDo(() => win.setClosable(true))
   }
   log('EXAM OFF')
+  setTimeout(() => checkUpdate('background'), 8000)          // l'examen est fini : une mise à jour en attente peut être proposée
   return { ok: true }
 }
 
@@ -329,6 +332,111 @@ function closeAssist() { if (assistWin && !assistWin.isDestroyed()) { try { assi
 
 // ── Pont avec la page CEI (uniquement depuis un site autorisé) ───────────────────────────────────────────────────────────────
 const fromAllowed = e => { try { return isAllowed(e.senderFrame.url) } catch { return false } }
+
+// ── Mise à jour automatique ──────────────────────────────────────────────────────────────────────────────────────────────
+// Vérifiée au démarrage puis toutes les 30 min, JAMAIS pendant un examen. Fichier téléchargé depuis le serveur CEI, somme SHA-256 ET signature
+// HMAC (secret embarqué) contrôlées avant toute exécution. Windows : installateur silencieux ; Linux AppImage : remplacement du fichier ;
+// macOS : remplacement du paquet .app. Autres cas (paquet .deb…) : la page de téléchargement est proposée.
+const upd = { busy: false, win: null, choice: null, manualShown: new Set() }
+const updStateFile = () => path.join(app.getPath('userData'), 'update-state.json')
+const readUpdState = () => { try { return JSON.parse(fs.readFileSync(updStateFile(), 'utf8')) } catch { return {} } }
+const updSend = st => { if (upd.win && !upd.win.isDestroyed()) upd.win.webContents.send('upd:state', st) }
+function updClose() { if (upd.win && !upd.win.isDestroyed()) { try { upd.win.destroy() } catch { /* déjà fermée */ } } upd.win = null }
+function updOpen() {
+  if (upd.win && !upd.win.isDestroyed()) return
+  upd.win = new BrowserWindow({ width: 480, height: 270, resizable: false, minimizable: false, maximizable: false, alwaysOnTop: true, title: 'Mise à jour de CEI Examen',
+    autoHideMenuBar: true, show: false, icon: path.join(__dirname, 'icon.png'), webPreferences: { nodeIntegration: true, contextIsolation: false } })
+  upd.win.setMenu(null)
+  upd.win.once('ready-to-show', () => upd.win && !upd.win.isDestroyed() && upd.win.show())
+  upd.win.on('closed', () => { upd.win = null; if (upd.choice) { upd.choice('later'); upd.choice = null } })
+  upd.win.loadFile(path.join(__dirname, 'update.html'))
+}
+const updWait = () => new Promise(res => { upd.choice = res })
+ipcMain.on('upd:choice', (_e, c) => { if (upd.choice) { const f = upd.choice; upd.choice = null; f(String(c)) } })
+
+async function fetchReleases() {
+  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 10000)
+  try {
+    const r = await net.fetch(cfg.releasesUrl, { signal: ctl.signal, headers: { 'User-Agent': `CEIExamClient/${cfg.version}`, Accept: 'application/json' } })
+    return r.ok ? await r.json() : null
+  } catch { return null } finally { clearTimeout(to) }
+}
+
+async function installUpdate(sel) {
+  const e = sel.entry
+  const dir = path.join(app.getPath('temp'), 'cei-examen-update')
+  try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* rien à nettoyer */ }
+  const dest = path.join(dir, e.name)
+  // Servi par nginx (/static/downloads/…) : ces fichiers pèsent 100 à 200 Mo et ne doivent pas occuper l'API ; repli sur le point d'accès de l'API
+  const url = new URL(/^\/static\/downloads\/[A-Za-z0-9._%-]+$/.test(String(e.url || '')) ? e.url : `/api/exam-client/download/${encodeURIComponent(e.name)}`, cfg.url).toString()
+  updSend({ phase: 'download', version: sel.version, pct: 0 })
+  await updater.download({ fetchFn: (u, o) => net.fetch(u, { ...o, headers: { 'User-Agent': `CEIExamClient/${cfg.version}` } }), url, dest, expectedSha256: e.sha256, expectedSize: e.size,
+    onProgress: p => updSend({ phase: 'download', version: sel.version, pct: p }) })
+  if (exam.active) { try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* rien */ } updClose(); return }      // un examen vient de commencer : on n'y touche pas
+  updSend({ phase: 'install', version: sel.version })
+  fs.writeFileSync(updStateFile(), JSON.stringify({ target: sel.version, at: Date.now() }))
+  log('UPDATE install', sel.version, sel.mode)
+  const bye = () => { allowQuit = true; setTimeout(() => app.quit(), 500) }
+  if (sel.mode === 'nsis') {
+    spawn('cmd.exe', ['/d', '/s', '/c', `"${updater.winRelaunchCommand(dest, process.execPath)}"`], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref()
+    return bye()
+  }
+  if (sel.mode === 'appimage') {
+    const target = process.env.APPIMAGE
+    fs.accessSync(path.dirname(target), fs.constants.W_OK)
+    fs.copyFileSync(dest, target + '.new'); fs.chmodSync(target + '.new', 0o755); fs.renameSync(target + '.new', target)
+    const env = { ...process.env }; for (const k of ['APPIMAGE', 'APPDIR', 'ARGV0', 'OWD']) delete env[k]
+    spawn('/bin/sh', ['-c', updater.linuxRelaunchCommand(target)], { detached: true, stdio: 'ignore', env }).unref()
+    return bye()
+  }
+  if (sel.mode === 'mac-zip') {
+    const bundle = path.resolve(process.execPath, '..', '..', '..')
+    if (!/\.app$/.test(bundle)) throw new Error("application introuvable (installation non standard)")
+    fs.accessSync(path.dirname(bundle), fs.constants.W_OK); fs.accessSync(bundle, fs.constants.W_OK)
+    const sh = path.join(dir, 'remplacer.sh'); fs.writeFileSync(sh, updater.macReplaceScript(), { mode: 0o755 })
+    spawn('/bin/sh', [sh, String(process.pid), dest, bundle], { detached: true, stdio: 'ignore' }).unref()
+    return bye()
+  }
+  throw new Error('mode de mise à jour inconnu')
+}
+
+/** mode : 'startup' (installe tout seul), 'manual' (demandé par la page, installe tout seul), 'background' (propose, l'étudiant choisit). */
+async function checkUpdate(mode) {
+  if (cfg.noUpdate || (!app.isPackaged && !cfg.updateTest)) return { skipped: 'off' }
+  if (exam.active) return { skipped: 'exam' }
+  if (upd.busy) return { skipped: 'busy' }
+  upd.busy = true
+  try {
+    const rel = await fetchReleases()
+    if (!rel) return { skipped: 'offline' }
+    const sel = updater.selectUpdate(rel, { platform: process.platform, arch: process.arch, current: cfg.version, appImage: process.env.APPIMAGE, secret: cfg.clientSecret })
+    if (!sel) return { skipped: 'uptodate' }
+    if (exam.active) return { skipped: 'exam' }
+    const st = readUpdState()
+    if (!sel.manual && st.target === sel.version && Date.now() - (st.at || 0) < 6 * 3600 * 1000) { log('UPDATE déjà tentée récemment', sel.version); return { skipped: 'recent-attempt' } }
+    if (sel.manual) {                                        // plus récente, mais pas installable automatiquement ici : on prévient une fois
+      if (upd.manualShown.has(sel.version)) return { skipped: 'manual-shown' }
+      upd.manualShown.add(sel.version)
+      updOpen(); updSend({ phase: 'manual', version: sel.version, current: cfg.version })
+      if ((await updWait()) === 'open') shell.openExternal(new URL('/telecharger-client', cfg.url).toString())
+      updClose(); return { manual: true }
+    }
+    updOpen()
+    if (mode === 'background') {
+      updSend({ phase: 'ask', version: sel.version, current: cfg.version })
+      if ((await updWait()) !== 'install') { updClose(); return { later: true } }
+    }
+    await installUpdate(sel)
+    return { installing: true }
+  } catch (e) {
+    log('UPDATE échec', e.message)
+    updSend({ phase: 'error', message: String(e.message || e).slice(0, 160) }); setTimeout(updClose, 7000)
+    return { error: String(e.message || e) }
+  } finally { upd.busy = false }
+}
+ipcMain.handle('cei:update-now', e => fromAllowed(e) ? checkUpdate('manual') : { skipped: 'denied' })
+ipcMain.handle('cei:update-info', e => fromAllowed(e) ? { version: cfg.version, updating: upd.busy } : null)
+
 ipcMain.handle('cei:info', e => fromAllowed(e) ? { client: 'CEIExamClient', version: cfg.version, platform: process.platform, arch: process.arch, examMode: exam.active, vm: vmInfo.vm } : null)
 // Autorisations du système (Windows 10/11 et macOS) : caméra, micro, enregistrement de l'écran (macOS). 'granted' | 'denied' | 'not-determined' | 'unknown'
 const mediaAccess = () => {
@@ -394,6 +502,11 @@ app.whenReady().then(async () => {
   vmInfo = await guard.detectVM()
   log('START', cfg.version, process.platform, 'vm=' + vmInfo.vm, vmInfo.hint)
   createWindow()
+  if (!cfg.test) {                                         // contrôle au démarrage (avant la connexion), puis régulièrement hors examen
+    // Départs étalés au hasard : 3000 étudiants ne téléchargent pas 100 Mo à la même seconde
+    setTimeout(() => checkUpdate('startup'), 2500 + Math.floor(Math.random() * cfg.updateJitterMs))
+    setInterval(() => checkUpdate('background'), cfg.updateEveryMs + Math.floor(Math.random() * 300000)).unref()
+  }
   const first = process.argv.find(a => String(a).startsWith(PROTO + '://'))
   if (first) win.webContents.once('did-finish-load', () => openDeepLink(first))
 })

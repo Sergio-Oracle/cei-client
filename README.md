@@ -51,6 +51,20 @@ Pour retirer toute possibilité de sortie par l'ancien code des versions 1.1.x, 
 **Réglages par examen** (création de l'examen ou *Paramètres*, quand l'application est exigée) : sites d'assistance (https, 5 au plus), applications tolérées (noms de programmes ; jamais un outil de
 contrôle à distance), refus des machines virtuelles. Ils sont validés par le serveur (`services/exam_settings.py`) et transmis à l'application au démarrage de l'examen.
 
+**Mise à jour automatique (depuis 1.3.0).** L'application interroge `GET /api/exam-client/releases` au démarrage (après un délai aléatoire de 0 à 15 s pour étaler la charge) puis toutes les 30 minutes.
+Si une version plus récente existe : au démarrage elle se télécharge et s'installe toute seule (fenêtre de progression, redémarrage automatique) ; en cours d'utilisation elle **propose** l'installation
+(« Installer maintenant » / « Plus tard »). **Jamais pendant un examen** (mode examen actif) ; après l'examen, une mise à jour en attente est proposée. Si le serveur refuse une version trop ancienne
+(`CEI_CLIENT_MIN_VERSION`, code 426), la page d'examen déclenche la mise à jour aussitôt. Garde-fous : somme SHA-256 ET signature HMAC (secret embarqué, calculée par `scripts/publish.js`) vérifiées avant
+toute exécution ; un fichier modifié ou signé par un autre est rejeté et effacé ; une tentative d'installation de la même version est mémorisée 6 h (aucune boucle si l'installateur échoue).
+| Système | Ce que fait la mise à jour |
+|---|---|
+| Windows | télécharge l'installateur, l'exécute en silence (`/S`, sans droits administrateur) puis relance l'application |
+| Linux AppImage | remplace le fichier AppImage (dossier modifiable requis) puis relance |
+| Linux .deb, macOS sans archive | propose la page de téléchargement (installation par le système, mot de passe nécessaire) |
+| macOS | remplace le paquet « CEI Examen.app » par celui de l'archive `-universal-mac.zip` (dossier modifiable requis), retire la quarantaine, relance |
+Publier une version : construire (Linux + Windows ici, macOS par GitHub Actions), placer l'archive macOS dans `dist/`, puis `node scripts/publish.js <dossier>` (écrit `latest.json` avec `files` ET `updates` signés),
+téléverser les fichiers PUIS `latest.json` en dernier. Les versions antérieures à 1.3.0 n'ont pas ce mécanisme : elles doivent être réinstallées à la main une fois. `CEI_NO_UPDATE=1` désactive la mise à jour (essais).
+
 **Le secret** (`src/secret.json`) est créé une seule fois et **conservé** : le régénérer (`node scripts/make-secret.js --force`) rend INVALIDES toutes
 les applications déjà installées, qu'il faudrait réinstaller. La même valeur doit être sur le serveur (`CEI_CLIENT_SECRET`, voir `build/server.env`).
 

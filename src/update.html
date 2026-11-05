@@ -1,0 +1,21 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Mise à jour de CEI Examen</title>
+<style>body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh}
+.box{width:410px}h1{font-size:19px;margin:0 0 8px}p{margin:0 0 14px;font-size:14px;color:#cbd5e1;line-height:1.5}
+.bar{height:10px;background:#1e293b;border-radius:99px;overflow:hidden;margin:6px 0 10px}.bar>i{display:block;height:100%;width:0;background:#3b82f6;transition:width .2s}
+.row{display:flex;gap:10px;margin-top:6px}button{flex:1;padding:11px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;background:#2563eb;color:#fff}button.alt{background:#334155;color:#e2e8f0}
+small{color:#94a3b8;font-size:12.5px}.err{color:#fca5a5}</style></head>
+<body><div class="box"><h1 id="t">Mise à jour de CEI Examen</h1><p id="p">Recherche de mises à jour…</p>
+<div class="bar" id="bw" style="display:none"><i id="b"></i></div><div class="row" id="r"></div><small id="s"></small></div>
+<script>
+const {ipcRenderer}=require('electron')
+const $=id=>document.getElementById(id)
+const btn=(txt,val,alt)=>{const b=document.createElement('button');b.textContent=txt;if(alt)b.className='alt';b.onclick=()=>ipcRenderer.send('upd:choice',val);return b}
+ipcRenderer.on('upd:state',(_e,st)=>{
+  $('r').innerHTML='';$('bw').style.display='none';$('s').textContent='';$('p').className=''
+  if(st.phase==='ask'){$('t').textContent='Une mise à jour est disponible';$('p').textContent='CEI Examen '+st.version+' est disponible (vous utilisez la version '+st.current+'). L\'installation prend environ une minute ; l\'application redémarre toute seule.';$('r').append(btn('Installer maintenant','install'),btn('Plus tard','later',true));$('s').textContent='Jamais pendant un examen.'}
+  else if(st.phase==='download'){$('t').textContent='Mise à jour vers la version '+st.version;$('p').textContent='Téléchargement en cours… ne fermez pas l\'application.';$('bw').style.display='block';$('b').style.width=Math.round((st.pct||0)*100)+'%';$('s').textContent=Math.round((st.pct||0)*100)+' %'}
+  else if(st.phase==='install'){$('t').textContent='Installation de la version '+st.version;$('p').textContent='L\'application va se fermer et se rouvrir toute seule dans un instant.';$('bw').style.display='block';$('b').style.width='100%'}
+  else if(st.phase==='manual'){$('t').textContent='Une nouvelle version est disponible';$('p').textContent='La version '+st.version+' est disponible (vous utilisez la '+st.current+'). Sur ce poste, elle doit être installée à la main : téléchargez-la depuis la page de téléchargement de CEI Examen.';$('r').append(btn('Ouvrir la page de téléchargement','open'),btn('Plus tard','later',true))}
+  else if(st.phase==='error'){$('t').textContent='Mise à jour impossible';$('p').className='err';$('p').textContent='La mise à jour automatique a échoué ('+(st.message||'erreur')+'). Vous pouvez continuer : l\'application réessaiera plus tard.'}
+})
+</script></body></html>
