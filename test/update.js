@@ -30,10 +30,12 @@ function scenario(name, { badSig = false, wrongBytes = false }, expectInstalled)
     })
     server.listen(0, '127.0.0.1', () => {
       const port = server.address().port
-      const env = { ...process.env, CEI_URL: `http://127.0.0.1:${port}/`, CEI_ALLOWED_HOSTS: '127.0.0.1', CEI_UPDATE_TEST: '1', APPIMAGE: target, CEI_USERDATA: path.join(work, 'profil'), ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
+      // CEI_BIN : essai du binaire EMPAQUETÉ (app.isPackaged vrai) SANS l'option d'essai — c'est exactement le chemin de production
+      const env = { ...process.env, CEI_URL: `http://127.0.0.1:${port}/`, CEI_ALLOWED_HOSTS: '127.0.0.1', APPIMAGE: target, CEI_USERDATA: path.join(work, 'profil'), ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
+      if (!process.env.CEI_BIN) env.CEI_UPDATE_TEST = '1'
       delete env.ELECTRON_RUN_AS_NODE; delete env.CEI_TEST
-      const bin = path.join(__dirname, '..', 'node_modules', '.bin', 'electron')
-      const child = spawn('xvfb-run', ['-a', bin, path.join(__dirname, '..'), '--no-sandbox', '--disable-gpu'], { env, stdio: 'ignore', detached: true })
+      const cmd = process.env.CEI_BIN ? [process.env.CEI_BIN] : [path.join(__dirname, '..', 'node_modules', '.bin', 'electron'), path.join(__dirname, '..')]
+      const child = spawn('xvfb-run', ['-a', ...cmd, '--no-sandbox', '--disable-gpu'], { env, stdio: 'ignore', detached: true })
       let exited = false; child.on('exit', () => { exited = true })
       ;(async () => {
         for (let i = 0; i < 40 && !fs.existsSync(marker) && !(exited && i > 5); i++) await sleep(1000)

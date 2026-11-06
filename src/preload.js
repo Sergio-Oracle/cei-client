@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('ceiClient', {
   configure: opts => ipcRenderer.invoke('cei:configure', opts || {}),      // identité de l'examen, sites d'assistance et applications tolérées (avant l'entrée en mode examen)
   openAssist: url => ipcRenderer.invoke('cei:assist-open', url),
   closeAssist: () => ipcRenderer.invoke('cei:assist-close'),
+  ports: () => ipcRenderer.invoke('cei:ports'),                        // écrans branchés et disques USB (vérification avant l'examen)
   updateNow: () => ipcRenderer.invoke('cei:update-now'),          // la page demande la mise à jour (version trop ancienne refusée par le serveur)
   updateInfo: () => ipcRenderer.invoke('cei:update-info'),
   leaveExamMode: () => ipcRenderer.invoke('cei:leave'),

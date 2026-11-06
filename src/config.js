@@ -31,6 +31,8 @@ module.exports = {
   releasesUrl: new URL('/api/exam-client/releases', url).toString(),
   updateEveryMs: parseInt(process.env.CEI_UPDATE_EVERY_MS || String(30 * 60 * 1000), 10),
   updateJitterMs: parseInt(process.env.CEI_UPDATE_JITTER_MS || '15000', 10),
+  portsMs: parseInt(process.env.CEI_PORTS_MS || '10000', 10),   // contrôle des ports (écrans externes, disques USB) pendant l'examen
+  noPorts: process.env.CEI_NO_PORTS === '1',                      // essais / dépannage uniquement
   noUpdate: process.env.CEI_NO_UPDATE === '1',
   updateTest: process.env.CEI_UPDATE_TEST === '1',       // essais : autorise la mise à jour d'une application non empaquetée
 }

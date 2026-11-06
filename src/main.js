@@ -171,6 +171,23 @@ function coverOtherDisplays() {
   }
 }
 
+// ── Ports : sorties vidéo externes et stockage USB ───────────────────────────────────────────────────────────────────────────
+// Refus à l'entrée (voir cei:sign + serveur), correction automatique pendant l'examen (disque USB éjecté, sortie vidéo externe coupée quand
+// le système le permet à un simple utilisateur), écran supplémentaire recouvert (coverOtherDisplays), tout est signalé au surveillant.
+const portSeen = new Map()
+async function checkPorts() {
+  const electronCount = screen.getAllDisplays().length
+  const p = await guard.detectPorts(electronCount)
+  const badDisp = p.displays > 1, badUsb = p.usb.length > 0
+  if (!badDisp && !badUsb) return p
+  const done = await guard.enforcePorts(p)
+  const now = Date.now()
+  if (badUsb && now - (portSeen.get('usb') || 0) > 60000) { portSeen.set('usb', now); report('client_usb_storage', { count: p.usb.length, ejected: done.ejected }) }
+  // Plusieurs écrans visibles pour Electron : déjà signalé et recouvert par coverOtherDisplays ; ici, le cas invisible pour lui (écran dupliqué / en miroir)
+  if (badDisp && p.displays > electronCount && now - (portSeen.get('display') || 0) > 60000) { portSeen.set('display', now); report('client_external_display', { count: p.displays, kinds: p.displayNames, off: done.displaysOff }) }
+  return p
+}
+
 function startWatchers() {
   const every = (ms, fn) => timers.push(setInterval(() => { try { fn() } catch (e) { log('ERR watcher', e.message) } }, ms))
   every(400, () => {                                         // reprise du premier plan
@@ -203,6 +220,12 @@ function startWatchers() {
         }
       }
     } finally { sweeping = false }
+  })
+  let portsBusy = false
+  every(cfg.portsMs, async () => {
+    if (!exam.active || portsBusy || cfg.noPorts) return
+    portsBusy = true
+    try { await checkPorts() } finally { portsBusy = false }
   })
   every(cfg.scanMs, async () => {
     if (!exam.active) return
@@ -240,6 +263,7 @@ function enterExamMode(opts = {}) {
   win.on('leave-full-screen', () => { if (exam.active && win && !win.isDestroyed()) { try { win.setKiosk(true) } catch { win.setFullScreen(true) } } })
   win.on('hide', () => { if (exam.active && win && !win.isDestroyed()) win.show() })
   registerGlobalShortcuts(); startWatchers(); coverOtherDisplays()
+  if (!cfg.noPorts) checkPorts().catch(e => log('ERR ports', e.message))
   clearTimeout(exam.maxTimer)
   exam.maxTimer = setTimeout(() => { report('client_exam_mode_timeout'); leaveExamMode() }, (Math.max(5, Math.min(600, maxMinutes)) + 15) * 60000)   // jamais d'élève prisonnier
   log('EXAM ON')
@@ -457,7 +481,9 @@ ipcMain.handle('cei:sign', async (e, { nonce, userId, examId } = {}) => {
   const msg = `${nonce}|${userId}|${cfg.version}|${process.platform}`
   const sig = crypto.createHmac('sha256', cfg.clientSecret).update(msg).digest('hex')
   const rs = await guard.detectRemoteSession()
-  return { sig, version: cfg.version, platform: process.platform, vm: vmInfo.vm, vm_hint: vmInfo.hint, remote: rs.remote, remote_hint: rs.hint, examId }
+  const pt = cfg.noPorts ? { displays: 1, usb: [] } : await guard.detectPorts(screen.getAllDisplays().length)
+  return { sig, version: cfg.version, platform: process.platform, vm: vmInfo.vm, vm_hint: vmInfo.hint, remote: rs.remote, remote_hint: rs.hint, examId,
+    displays: pt.displays, usb_storage: pt.usb.length }
 })
 ipcMain.handle('cei:apps', async e => fromAllowed(e) ? { apps: [...new Map((await guard.listWindowApps(selfIdentity())).map(a => [a.name, a])).values()].map(a => ({ name: a.name })) } : null)
 ipcMain.handle('cei:apps-close', async e => {
@@ -469,6 +495,7 @@ ipcMain.handle('cei:apps-close', async e => {
   return { closed: apps.length - left.length, remaining: [...new Set(left.map(a => a.name))].map(name => ({ name })) }
 })
 ipcMain.handle('cei:enter', (e, opts) => fromAllowed(e) ? enterExamMode(opts) : { ok: false })
+ipcMain.handle('cei:ports', async e => fromAllowed(e) ? await guard.detectPorts(screen.getAllDisplays().length) : null)
 ipcMain.handle('cei:configure', (e, opts) => { if (!fromAllowed(e)) return { ok: false }; applyExamConfig(opts || {}); return { ok: true } })
 ipcMain.handle('cei:assist-open', (e, url) => fromAllowed(e) ? openAssist(String(url || '')) : { ok: false })
 ipcMain.handle('cei:assist-close', e => { if (!fromAllowed(e)) return { ok: false }; closeAssist(); return { ok: true } })

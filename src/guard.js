@@ -212,4 +212,105 @@ async function closeApps(apps, self, { graceMs = 6000, force = false } = {}) {
   return left
 }
 
-module.exports = { forbiddenRunning, remoteToolsIn, killRemoteTools, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
+// ── Ports : sorties vidéo externes (HDMI, VGA, DisplayPort, projection sans fil) et stockage USB ────────────────────────────────
+// Une application ne peut pas désactiver un port matériel sans droits d'administrateur ; elle peut en revanche (1) détecter ce qui y est branché,
+// (2) refuser de démarrer l'examen tant que c'est branché, (3) corriger elle-même ce que le système permet à un simple utilisateur :
+// éjecter un disque USB, couper une sortie vidéo externe (Windows, Linux), recouvrir l'écran supplémentaire (tous systèmes).
+// Les analyseurs ci-dessous sont PURS (testés avec des sorties réelles de chaque système).
+
+/** Windows : un nombre par moniteur ACTIF (WmiMonitorConnectionParams.VideoOutputTechnology : 0 VGA, 4 DVI, 5 HDMI, 10 DisplayPort, 15 Miracast, 6/11/13 ou 2147483648 = écran interne). */
+function parseWinMonitors(txt) {
+  return String(txt || '').split(/\r?\n/).map(l => l.trim()).filter(l => /^-?\d+$/.test(l)).map(Number)
+}
+/** Linux : sorties xrandr connectées → [{ name, primary, internal }]. */
+function parseXrandr(txt) {
+  const out = []
+  for (const l of String(txt || '').split('\n')) {
+    const m = l.match(/^(\S+) connected( primary)?/)
+    if (m) out.push({ name: m[1], primary: !!m[2], internal: /^(eDP|LVDS|DSI)/i.test(m[1]) })
+  }
+  return out
+}
+/** macOS : nombre d'écrans listés par `system_profiler SPDisplaysDataType -json` (en miroir, chaque écran reste listé). */
+function parseMacDisplays(txt) {
+  try {
+    const j = JSON.parse(txt)
+    return (j.SPDisplaysDataType || []).reduce((n, g) => n + ((g.spdisplays_ndrvs || []).length), 0)
+  } catch { return 0 }
+}
+/** Windows : lettres des volumes portés par un disque USB. */
+function parseWinUsbLetters(txt) {
+  return [...new Set(String(txt || '').split(/\r?\n/).map(l => l.trim().toUpperCase()).filter(l => /^[A-Z]$/.test(l)))]
+}
+/** macOS : disques externes physiques (`diskutil list external physical`). */
+function parseMacExternalDisks(txt) {
+  return [...String(txt || '').matchAll(/^(\/dev\/disk\d+)\s+\(external, physical\)/gm)].map(m => m[1])
+}
+/** Linux : disques USB / amovibles branchés (lsblk -J) → [{ path, mounts: [points de montage], partitions: [chemins montés] }]. */
+function parseLsblk(txt) {
+  let j; try { j = JSON.parse(txt) } catch { return [] }
+  const out = []
+  for (const d of j.blockdevices || []) {
+    if (d.type !== 'disk') continue
+    const usb = String(d.tran || '').toLowerCase() === 'usb' || d.rm === true || d.hotplug === true
+    if (!usb || !Number(d.size)) continue                       // un lecteur de cartes VIDE (taille 0) n'est pas un disque branché
+    const parts = [d, ...(d.children || [])].filter(x => x.mountpoint)
+    out.push({ path: d.path || '/dev/' + d.name, mounts: parts.map(x => x.mountpoint), partitions: parts.map(x => x.path || '/dev/' + x.name) })
+  }
+  return out
+}
+
+/** Ce qui est branché maintenant : { displays (nombre d'écrans actifs vus par le système), displayNames, usb: [{ id, label }] }. `electronDisplays` : nombre vu par Electron. */
+async function detectPorts(electronDisplays = 1) {
+  let displays = electronDisplays, names = [], usb = []
+  try {
+    if (process.platform === 'win32') {
+      const mon = parseWinMonitors(await run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+        "Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorConnectionParams | Where-Object { $_.Active } | ForEach-Object { [string]$_.VideoOutputTechnology }"], 12000))
+      displays = Math.max(electronDisplays, mon.length)
+      names = mon.map(n => ({ 0: 'VGA', 4: 'DVI', 5: 'HDMI', 10: 'DisplayPort', 15: 'projection sans fil' }[n] || (n === 6 || n === 11 || n === 13 || n === 2147483648 ? 'écran intégré' : 'sortie vidéo')))
+      const letters = parseWinUsbLetters(await run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+        "Get-Disk | Where-Object { $_.BusType -eq 'USB' } | Get-Partition | Where-Object { $_.DriveLetter } | ForEach-Object { [string]$_.DriveLetter }"], 12000))
+      usb = letters.map(l => ({ id: l, label: `lecteur ${l}:` }))
+    } else if (process.platform === 'darwin') {
+      displays = Math.max(electronDisplays, parseMacDisplays(await run('system_profiler', ['SPDisplaysDataType', '-json'], 15000)))
+      usb = parseMacExternalDisks(await run('diskutil', ['list', 'external', 'physical'])).map(d => ({ id: d, label: d }))
+    } else {
+      const xr = parseXrandr(await run('xrandr', ['--query']))
+      displays = Math.max(electronDisplays, xr.length); names = xr.map(x => x.name)
+      usb = parseLsblk(await run('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TRAN,RM,HOTPLUG,MOUNTPOINT,TYPE,SIZE'])).map(d => ({ id: d.path, label: d.path, mounts: d.mounts, partitions: d.partitions }))
+    }
+  } catch { /* commande indisponible : on ne bloque personne sur une détection impossible */ }
+  return { displays, displayNames: names, usb }
+}
+
+/** Corrige ce que le système permet à un simple utilisateur : éjecte les disques USB, coupe les sorties vidéo externes (Windows, Linux). Retourne ce qui a été fait. */
+async function enforcePorts(ports, { eject = true, displaysOff = true } = {}) {
+  const done = { ejected: [], displaysOff: [] }
+  if (eject) {
+    for (const u of ports.usb || []) {
+      let ok = false
+      if (process.platform === 'win32' && /^[A-Z]$/.test(u.id)) {
+        await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', `(New-Object -comObject Shell.Application).NameSpace(17).ParseName('${u.id}:').InvokeVerb('Eject')`], 12000); ok = true
+      } else if (process.platform === 'darwin' && /^\/dev\/disk\d+$/.test(u.id)) {
+        await run('diskutil', ['eject', u.id], 15000); ok = true
+      } else if (process.platform === 'linux' && /^\/dev\/[\w/-]+$/.test(String(u.id))) {
+        for (const part of u.partitions || []) if (/^\/dev\/[\w/-]+$/.test(part)) await run('udisksctl', ['unmount', '-b', part], 8000)
+        await run('udisksctl', ['power-off', '-b', u.id], 8000); ok = true
+      }
+      if (ok) done.ejected.push(u.label)
+    }
+  }
+  if (displaysOff && (ports.displays || 0) > 1) {
+    if (process.platform === 'win32') { await run('DisplaySwitch.exe', ['/internal'], 8000); done.displaysOff.push('écran seul (DisplaySwitch /internal)') }
+    else if (process.platform === 'linux') {
+      const xr = parseXrandr(await run('xrandr', ['--query']))
+      const keep = xr.find(x => x.primary) || xr.find(x => x.internal) || xr[0]
+      for (const x of xr) if (keep && x.name !== keep.name && /^[\w.-]+$/.test(x.name)) { await run('xrandr', ['--output', x.name, '--off'], 6000); done.displaysOff.push(x.name) }
+    }
+  }
+  return done
+}
+
+module.exports = {
+  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }

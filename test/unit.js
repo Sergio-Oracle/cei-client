@@ -50,6 +50,26 @@ t('Windows : installateur /S (silencieux) puis relance de l\'application', /setu
 t('macOS : le script remplace le paquet, retire la quarantaine et relance', /ditto -x -k/.test(u.macReplaceScript()) && /xattr -cr/.test(u.macReplaceScript()) && /open "\$APP"/.test(u.macReplaceScript()))
 t('Linux : relance du nouvel AppImage après fermeture', u.linuxRelaunchCommand('/home/a b/CEI.AppImage') === 'sleep 2; exec "/home/a b/CEI.AppImage"')
 
+// ── 1.4.0 : ports (écrans externes HDMI/VGA, disques USB) ──
+const XR1 = 'Screen 0: minimum 8 x 8, current 1920 x 1080, maximum 32767 x 32767\neDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 344mm x 193mm\nHDMI-1 disconnected (normal left inverted right x axis y axis)\nDP-1 disconnected\n'
+const XR2 = XR1.replace('HDMI-1 disconnected', 'HDMI-1 connected 1920x1080+1920+0')
+t('Linux : portable seul (eDP) = 1 écran, HDMI branché = 2 écrans', g.parseXrandr(XR1).length === 1 && g.parseXrandr(XR2).length === 2 && g.parseXrandr(XR2).find(x => x.name === 'HDMI-1') && g.parseXrandr(XR1)[0].internal)
+t('Windows : un moniteur interne seul = 1 ; interne + HDMI + VGA = 3', g.parseWinMonitors('2147483648\r\n').length === 1 && g.parseWinMonitors('2147483648\r\n5\r\n0\r\n').length === 3)
+t('Windows : sortie vide ou texte d\'erreur = aucun moniteur lu (jamais de blocage sur une détection impossible)', g.parseWinMonitors('').length === 0 && g.parseWinMonitors('Get-CimInstance : Invalid class').length === 0)
+const MACJ = JSON.stringify({ SPDisplaysDataType: [{ spdisplays_ndrvs: [{ _name: 'Color LCD' }, { _name: 'DELL U2720Q' }] }] })
+t('macOS : deux écrans listés (même en miroir) = 2 ; un seul = 1 ; sortie illisible = 0', g.parseMacDisplays(MACJ) === 2 && g.parseMacDisplays(JSON.stringify({ SPDisplaysDataType: [{ spdisplays_ndrvs: [{}] }] })) === 1 && g.parseMacDisplays('pas du json') === 0)
+t('Windows : lettres des volumes d\'un disque USB', JSON.stringify(g.parseWinUsbLetters('E\r\nF\r\n\r\nE\r\n')) === JSON.stringify(['E', 'F']))
+t('macOS : seuls les disques EXTERNES physiques sont retenus', JSON.stringify(g.parseMacExternalDisks('/dev/disk0 (internal, physical):\n   #: TYPE NAME\n/dev/disk2 (external, physical):\n   #: TYPE\n/dev/disk3 (synthesized):\n')) === JSON.stringify(['/dev/disk2']))
+const LSB = JSON.stringify({ blockdevices: [
+  { name: 'nvme0n1', path: '/dev/nvme0n1', tran: 'nvme', rm: false, hotplug: false, mountpoint: null, type: 'disk', children: [{ name: 'nvme0n1p2', path: '/dev/nvme0n1p2', mountpoint: '/', type: 'part' }] },
+  { name: 'sdb', path: '/dev/sdb', tran: 'usb', rm: true, hotplug: true, mountpoint: null, type: 'disk', size: 16000000000, children: [{ name: 'sdb1', path: '/dev/sdb1', mountpoint: '/media/etu/CLE', type: 'part' }] },
+  { name: 'sdc', path: '/dev/sdc', tran: 'usb', rm: true, hotplug: true, mountpoint: null, type: 'disk', size: 0 },
+  { name: 'loop0', path: '/dev/loop0', tran: null, rm: false, hotplug: false, mountpoint: '/snap/core', type: 'loop' }] })
+const lb = g.parseLsblk(LSB)
+t('Linux : la clé USB (sdb) est détectée avec ses points de montage ; le disque interne et les snaps ne le sont pas', lb.length === 1 && lb[0].path === '/dev/sdb' && lb[0].mounts[0] === '/media/etu/CLE' && lb[0].partitions[0] === '/dev/sdb1')
+t('Linux : un lecteur de cartes USB VIDE (taille 0) n\'est pas un disque branché', lb.every(d => d.path !== '/dev/sdc'))
+t('Linux : aucun disque amovible = liste vide ; sortie illisible = liste vide', g.parseLsblk(JSON.stringify({ blockdevices: [] })).length === 0 && g.parseLsblk('x').length === 0)
+
 g.setExtraAllow(['WhatsApp']);
 (async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cei-upd-')), body = Buffer.from('contenu-de-la-mise-a-jour'.repeat(1000)), sha = crypto.createHash('sha256').update(body).digest('hex')
