@@ -32,6 +32,11 @@ const REMOTE_TOOLS = new Set([
   'remoteassistance', 'microsoft remote desktop', 'screensharingd', 'ardagent', 'remotemanagementd', 'sunshine', 'moonlight', 'steamstreaming',
 ])
 
+// Messageries et visioconférence : leur fenêtre fermée, elles restent actives en arrière-plan (icône près de l'horloge, Teams et Zoom surtout).
+// Le balayage des fenêtres ne les voit pas et l'étudiant n'a rien à « fermer » : 7 des 8 signalements « logiciel interdit » du test du 13/11
+// (examen 179) étaient Teams ou Zoom ainsi laissés en tâche de fond. Elles sont donc ARRÊTÉES par le client, comme les outils à distance.
+const BACKGROUND_APPS = new Set(['zoom', 'zoom.us', 'skype', 'skypeapp', 'teams', 'ms-teams', 'msteams', 'discord', 'slack', 'telegram', 'whatsapp', 'signal', 'webex'])
+
 function run(cmd, args, timeout = 6000) {
   return new Promise(resolve => {
     execFile(cmd, args, { timeout, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => resolve(err ? '' : String(stdout || '')))
@@ -65,13 +70,20 @@ function remoteToolsIn(names) {
   return [...out]
 }
 
-/** Arrête les outils de contrôle à distance (processus de l'utilisateur ; un service protégé ne s'arrête pas : il reste signalé). Retourne ce qui tourne encore. */
-async function killRemoteTools(names) {
+/** Arrête des processus de l'utilisateur par leur nom (un service protégé ne s'arrête pas). Retourne ceux de `names` qui tournent encore. */
+async function killProcesses(names) {
   for (const n of names) {
     if (process.platform === 'win32') await run('taskkill', ['/F', '/T', '/IM', n.replace(/[^\w .-]/g, '') + '.exe'], 5000)
     else await run('pkill', ['-9', '-x', n.replace(/[^\w .-]/g, '')], 4000)
   }
   await new Promise(r => setTimeout(r, 600))
+  const wanted = new Set(names.map(norm))
+  return [...new Set((await listProcesses()).map(norm).filter(n => wanted.has(n)))]
+}
+
+/** Arrête les outils de contrôle à distance. Retourne ce qui tourne encore. */
+async function killRemoteTools(names) {
+  await killProcesses(names)
   return remoteToolsIn(await listProcesses())
 }
 
@@ -313,4 +325,4 @@ async function enforcePorts(ports, { eject = true, displaysOff = true } = {}) {
 }
 
 module.exports = {
-  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
+  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }

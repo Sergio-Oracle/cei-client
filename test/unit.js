@@ -29,6 +29,14 @@ t('Windows : rdpclip lancé = session à distance', g.remoteFromSignals({ platfo
 t('macOS : partage d\'écran actif (screensharingd) = session à distance', g.remoteFromSignals({ platform: 'darwin', procs: ['screensharingd'] }).remote === true)
 t('Linux : session xrdp / loginctl Remote=yes détectées', g.remoteFromSignals({ platform: 'linux', env: { XRDP_SESSION: '1' } }).remote && g.remoteFromSignals({ platform: 'linux', loginctlRemote: true }).remote)
 t('Linux local : pas de session à distance', g.remoteFromSignals({ platform: 'linux', env: {}, procs: ['gnome-shell'] }).remote === false)
+// ── 1.4.1 : messageries et visio laissées en arrière-plan = arrêtées, pas seulement signalées ──
+t('Teams, Zoom, Discord… sont des applications de fond arrêtées par le client', ['zoom', 'ms-teams', 'teams', 'discord', 'slack', 'skype', 'webex', 'whatsapp'].every(n => g.BACKGROUND_APPS.has(n)))
+t('une application de fond est aussi une application interdite (signalée)', [...g.BACKGROUND_APPS].every(n => g.FORBIDDEN.has(n) || n === 'msteams'))
+t("les outils à distance et les machines virtuelles ne sont PAS des applications de fond (comportement inchangé)", !g.BACKGROUND_APPS.has('anydesk') && !g.BACKGROUND_APPS.has('vmware'))
+g.setExtraAllow(['zoom'])
+const bgRun = g.forbiddenRunning(['Zoom.exe', 'ms-teams.exe', 'notepad.exe'])      // le calcul est synchrone (liste fournie) : l'exception est relue tout de suite
+g.setExtraAllow([])
+bgRun.then(r => t("exception d'examen : Zoom autorisé n'est plus signalé, Teams l'est encore", JSON.stringify(r) === JSON.stringify(['ms-teams'])))
 // ── 1.3.0 : mise à jour automatique (logique pure) ──
 const u = require('../src/updater'), fs = require('fs'), os = require('os'), path = require('path'), crypto = require('crypto')
 t('versions comparées numériquement (1.10.0 > 1.9.9, 1.2 < 1.2.1)', u.cmpVersion('1.10.0', '1.9.9') === 1 && u.cmpVersion('1.2.0', '1.2.0') === 0 && u.cmpVersion('1.2', '1.2.1') === -1)

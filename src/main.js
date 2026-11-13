@@ -231,11 +231,16 @@ function startWatchers() {
     if (!exam.active) return
     const procs = await guard.listProcesses()
     const remote = guard.remoteToolsIn(procs)
-    let still = []
-    if (remote.length) still = await guard.killRemoteTools(remote)                                  // arrêtés aussitôt, pas seulement signalés
-    for (const name of await guard.forbiddenRunning(procs)) {
+    const forb = await guard.forbiddenRunning(procs)
+    const bg = forb.filter(n => guard.BACKGROUND_APPS.has(n))                                      // messageries / visio laissées en tâche de fond
+    const toKill = [...new Set([...remote, ...bg])]
+    const still = toKill.length ? await guard.killProcesses(toKill) : []                           // arrêtés aussitôt, pas seulement signalés
+    for (const name of forb) {
       const last = exam.forbiddenSeen.get(name) || 0
-      if (Date.now() - last > 5 * 60 * 1000) { exam.forbiddenSeen.set(name, Date.now()); report('client_forbidden_app', { name, remote_tool: remote.includes(name), killed: remote.includes(name) && !still.includes(name) }) }
+      if (Date.now() - last > 5 * 60 * 1000) {
+        exam.forbiddenSeen.set(name, Date.now())
+        report('client_forbidden_app', { name, remote_tool: remote.includes(name), killed: toKill.includes(name) && !still.includes(name) })
+      }
     }
     const rs = await guard.detectRemoteSession()
     if (rs.remote && !exam.remoteSeen) { exam.remoteSeen = true; report('client_remote_session', { hint: rs.hint }) }
