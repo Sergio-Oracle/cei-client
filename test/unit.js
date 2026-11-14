@@ -94,6 +94,15 @@ g.setExtraAllow(['WhatsApp']);
   t('exception d\'examen : WhatsApp toléré, Discord signalé', !r.includes('whatsapp') && r.includes('discord'))
   t('exception d\'examen : un outil de contrôle à distance n\'est JAMAIS toléré', r.includes('teamviewer'))
   g.setExtraAllow([])
-  console.log(`\n${ok}/${ok + ko} vérifications réussies`)
+  
+// 1.5.0 : les services du système (session 0, fenêtre cachée sans titre) ne sont plus listés à fermer (« IdeaShareService », 14/11/2026)
+t('Windows : la liste ne retient que les fenêtres visibles (avec titre) de la session de l\'étudiant', /MainWindowTitle -ne ''/.test(g.WIN_APPS_PS) && /SessionId -eq \$s/.test(g.WIN_APPS_PS) && /MainWindowHandle -ne 0/.test(g.WIN_APPS_PS))
+t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'est pas dans la liste produite', !g.selectApps(g.parseWinApps(['4120|Notepad']), 'win32', self).some(a => a.name === 'IdeaShareService'))
+{
+  const { execFileSync } = require('child_process')
+  const mode = e => execFileSync(process.execPath, ['-e', "process.env.CEI_SHARE=process.argv[1];console.log(require('./src/config').shareMode)", e], { cwd: require('path').join(__dirname, '..'), encoding: 'utf8' }).trim()
+  t('partage : « écran » par défaut, « page » seulement si demandé (CEI_SHARE=page)', mode('') === 'screen' && mode('page') === 'page' && mode('autre') === 'screen')
+}
+console.log(`\n${ok}/${ok + ko} vérifications réussies`)
   process.exit(ko ? 1 : 0)
 }))

@@ -526,7 +526,10 @@ app.whenReady().then(async () => {
   ses.setPermissionRequestHandler((wc, perm, cb) => cb(okPerm.has(perm) && isAllowed(wc.getURL())))
   ses.setPermissionCheckHandler((wc, perm) => okPerm.has(perm) && (!wc || isAllowed(wc.getURL())))
   // Partage d'écran demandé par la page : l'écran principal est choisi d'office (aucun sélecteur à manipuler)
-  ses.setDisplayMediaRequestHandler(async (_req, cb) => {
+  ses.setDisplayMediaRequestHandler(async (req, cb) => {
+    // Mode « page » (essai, CEI_SHARE=page) : on partage le contenu de la page d'examen elle-même — capture interne du moteur, non concernée par la
+    // protection anti-capture du système, donc le surveillant voit la copie en direct. Repli sur l'écran si la page n'est pas disponible.
+    if (cfg.shareMode === 'page' && req && req.frame) { try { cb({ video: req.frame }); return } catch (e) { log('ERR partage page', e.message) } }
     try { const s = await desktopCapturer.getSources({ types: ['screen'] }); cb(s[0] ? { video: s[0] } : {}) } catch { cb({}) }
   })
   try { app.setAsDefaultProtocolClient(PROTO) } catch { /* non fatal */ }

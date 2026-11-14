@@ -180,12 +180,16 @@ function selectApps(raw, platform, self) {
   return out
 }
 
+// Seules comptent les applications VISIBLES de la session de l'étudiant : un service du système (session 0, fenêtre cachée sans titre,
+// ex. « IdeaShareService », 14/11/2026) n'est ni visible ni arrêtable sans droits d'administrateur — le lister enfermait l'étudiant
+// hors de son examen devant un bouton « Fermer ces applications » sans effet.
+const WIN_APPS_PS = "$s = (Get-Process -Id $PID).SessionId; Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.SessionId -eq $s } | ForEach-Object { $_.Id.ToString() + '|' + $_.ProcessName }"
+
 /** Applications avec fenêtre à fermer : [{ pid, xid, name }]. `self` = { pids:Set, names:Set } de l'application CEI Examen. */
 async function listWindowApps(self) {
   const raw = []
   if (process.platform === 'win32') {
-    raw.push(...parseWinApps(await run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
-      "Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object { $_.Id.ToString() + '|' + $_.ProcessName }"], 12000)))
+    raw.push(...parseWinApps(await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', WIN_APPS_PS], 12000)))
   } else if (process.platform === 'darwin') {
     raw.push(...parseMacApps(await run('ps', ['-axo', 'pid=,comm='])))
   } else {
@@ -325,4 +329,4 @@ async function enforcePorts(ports, { eject = true, displaysOff = true } = {}) {
 }
 
 module.exports = {
-  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
+  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }

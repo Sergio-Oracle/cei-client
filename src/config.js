@@ -34,5 +34,8 @@ module.exports = {
   portsMs: parseInt(process.env.CEI_PORTS_MS || '10000', 10),   // contrôle des ports (écrans externes, disques USB) pendant l'examen
   noPorts: process.env.CEI_NO_PORTS === '1',                      // essais / dépannage uniquement
   noUpdate: process.env.CEI_NO_UPDATE === '1',
+  // Contenu du partage d'écran envoyé au surveillant : 'screen' (bureau, comportement jusqu'à la 1.4.1, la fenêtre d'examen protégée n'y apparaît pas)
+  // ou 'page' (la page d'examen elle-même, donc la copie de l'étudiant en direct, sans retirer la protection anti-capture). Essai : CEI_SHARE=page.
+  shareMode: process.env.CEI_SHARE === 'page' ? 'page' : 'screen',
   updateTest: process.env.CEI_UPDATE_TEST === '1',       // essais : autorise la mise à jour d'une application non empaquetée
 }
