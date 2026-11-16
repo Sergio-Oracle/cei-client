@@ -270,7 +270,7 @@ function enterExamMode(opts = {}) {
   try { win.setKiosk(true) } catch { win.setFullScreen(true) }
   const tryDo = fn => { try { fn() } catch { /* option non disponible sur ce système */ } }
   tryDo(() => win.setAlwaysOnTop(true, 'screen-saver'))
-  tryDo(() => win.setContentProtection(true))             // capture / enregistrement d'écran : fenêtre noire
+  tryDo(() => win.setContentProtection(cfg.protectCapture))   // 1.8.0 : par défaut la fenêtre est visible dans le partage d'écran (comme dans le navigateur) ; CEI_PROTECT=1 la rend noire aux captures
   tryDo(() => win.setMinimizable(false)); tryDo(() => win.setResizable(false)); tryDo(() => win.setMovable(false)); tryDo(() => win.setClosable(false))
   win.focus(); clipboard.clear()
   // Aucun moyen de rester en fenêtre normale : si le plein écran est quitté par n'importe quelle voie, il est rétabli aussitôt
@@ -352,12 +352,12 @@ function openAssist(url) {
     webPreferences: { partition: 'cei-assist', contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: false, spellcheck: false, webSecurity: true },
   })
   assistWin.setMenu(null)
-  try { assistWin.setAlwaysOnTop(true, 'screen-saver'); assistWin.setContentProtection(true) } catch { /* option indisponible */ }
+  try { assistWin.setAlwaysOnTop(true, 'screen-saver'); assistWin.setContentProtection(cfg.protectCapture) } catch { /* option indisponible */ }
   const as = assistWin.webContents.session
   const okPermA = new Set(['media', 'display-capture', 'fullscreen', 'clipboard-sanitized-write', 'speaker-selection', 'notifications'])
   as.setPermissionRequestHandler((wc, perm, cb) => { let h = ''; try { h = new URL(wc.getURL()).hostname } catch { /* adresse illisible */ } cb(okPermA.has(perm) && assistAllowedHost(h)) })
   as.setPermissionCheckHandler((wc, perm) => okPermA.has(perm))
-  as.setDisplayMediaRequestHandler(async (_r, cb) => { try { const src = await desktopCapturer.getSources({ types: ['screen'] }); cb(src[0] ? { video: src[0] } : {}) } catch { cb({}) } })
+  as.setDisplayMediaRequestHandler(async (_r, cb) => { try { const src = guard.pickScreenSource(await desktopCapturer.getSources({ types: ['screen'] }), screen.getPrimaryDisplay().id); cb(src ? { video: src } : {}) } catch { cb({}) } })
   assistWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   const guardA = (e, u) => { let h = ''; try { h = new URL(u).hostname } catch { /* adresse illisible */ } if (!assistAllowedHost(h) || !okAssistUrl(u)) { e.preventDefault(); report('client_navigation_blocked', { url: String(u).slice(0, 200), where: 'assistance' }) } }
   assistWin.webContents.on('will-navigate', guardA); assistWin.webContents.on('will-redirect', guardA)
@@ -598,12 +598,12 @@ app.whenReady().then(async () => {
   const okPerm = new Set(['media', 'display-capture', 'fullscreen', 'notifications', 'clipboard-sanitized-write', 'keyboardLock', 'window-management', 'speaker-selection', 'pointerLock'])
   ses.setPermissionRequestHandler((wc, perm, cb) => cb(okPerm.has(perm) && isAllowed(wc.getURL())))
   ses.setPermissionCheckHandler((wc, perm) => okPerm.has(perm) && (!wc || isAllowed(wc.getURL())))
-  // Partage d'écran demandé par la page : l'écran principal est choisi d'office (aucun sélecteur à manipuler)
+  // Partage d'écran demandé par la page : l'écran principal (celui de l'examen) est choisi d'office, aucun sélecteur à manipuler. Fenêtre d'examen visible dedans (1.8.0).
   ses.setDisplayMediaRequestHandler(async (req, cb) => {
     // Mode « page » (essai, CEI_SHARE=page) : on partage le contenu de la page d'examen elle-même — capture interne du moteur, non concernée par la
     // protection anti-capture du système, donc le surveillant voit la copie en direct. Repli sur l'écran si la page n'est pas disponible.
     if (cfg.shareMode === 'page' && req && req.frame) { try { cb({ video: req.frame }); return } catch (e) { log('ERR partage page', e.message) } }
-    try { const s = await desktopCapturer.getSources({ types: ['screen'] }); cb(s[0] ? { video: s[0] } : {}) } catch { cb({}) }
+    try { const s = guard.pickScreenSource(await desktopCapturer.getSources({ types: ['screen'] }), screen.getPrimaryDisplay().id); cb(s ? { video: s } : {}) } catch { cb({}) }
   })
   try { app.setAsDefaultProtocolClient(PROTO) } catch { /* non fatal */ }
   guard.setExtraAllow(cfg.allowApps)

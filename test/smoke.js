@@ -81,7 +81,27 @@ const has = t => events.some(e => e.type === t)
     const ss = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always', displaySurface: 'monitor' }, preferCurrentTab: false, audio: false })
     const t = ss.getVideoTracks()[0], st = t.getSettings()
     rep('partage d\\'écran complet : flux actif, surface acceptée par l\\'examen', t.readyState === 'live' && (st.displaySurface === undefined || st.displaySurface === 'monitor'), JSON.stringify(st))
-    const ended = new Promise(r => t.addEventListener('ended', () => r(true)))
+    // 1.8.0 : le surveillant doit VOIR la copie de l'étudiant dans le partage (comme dans le navigateur) : la page prend une couleur reconnaissable,
+    // on lit une image du flux reçu et on vérifie qu'elle montre cette couleur (et non un bureau vide / un écran noir)
+    document.body.style.background = 'rgb(12,200,40)'; document.documentElement.style.background = 'rgb(12,200,40)'
+    const vid = document.createElement('video'); vid.muted = true; vid.srcObject = ss; await Promise.race([vid.play().catch(() => {}), wait(4000)])
+    for (let k = 0; k < 10 && !vid.videoWidth; k++) await wait(300)
+    const cv = document.createElement('canvas'); cv.width = 64; cv.height = 36
+    const share = async (r, g, bl) => {                      // part de l'image reçue qui a la couleur (r,g,b), moyenne de 4 images
+      let hits = 0, tot = 0
+      for (let k = 0; k < 4; k++) {
+        cv.getContext('2d').drawImage(vid, 0, 0, 64, 36); const d = cv.getContext('2d').getImageData(0, 0, 64, 36).data
+        for (let i = 0; i < d.length; i += 4) { tot++; if (Math.abs(d[i] - r) < 40 && Math.abs(d[i + 1] - g) < 40 && Math.abs(d[i + 2] - bl) < 40) hits++ }
+        await wait(300)
+      }
+      return tot ? hits / tot : 0
+    }
+    const white = await share(255, 255, 255)
+    rep('partage d\\'écran : tout ce qui est à l\\'écran est visible, y compris la fenêtre d\\'assistance ouverte (non masquée)', white > 0.2, 'part de blanc : ' + Math.round(100 * white) + ' %')
+    await c.closeAssist(); await wait(1200)
+    const green = await share(12, 200, 40)
+    rep('partage d\\'écran : l\\'image reçue montre la copie d\\'examen (la fenêtre n\\'est ni noire ni absente)', green > 0.5, 'part de la page : ' + Math.round(100 * green) + ' %, vidéo ' + vid.videoWidth + 'x' + vid.videoHeight)
+    await c.openAssist(location.origin + '/assist/salle'); await wait(600)
     t.stop()
     rep('partage d\\'écran : arrêt détectable', t.readyState === 'ended')
   } catch (e) { rep('partage d\\'écran complet', false, e.name + ' ' + e.message) }

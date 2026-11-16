@@ -34,8 +34,10 @@ module.exports = {
   portsMs: parseInt(process.env.CEI_PORTS_MS || '10000', 10),   // contrôle des ports (écrans externes, disques USB) pendant l'examen
   noPorts: process.env.CEI_NO_PORTS === '1',                      // essais / dépannage uniquement
   noUpdate: process.env.CEI_NO_UPDATE === '1',
-  // Contenu du partage d'écran envoyé au surveillant : 'screen' (bureau, comportement jusqu'à la 1.4.1, la fenêtre d'examen protégée n'y apparaît pas)
-  // ou 'page' (la page d'examen elle-même, donc la copie de l'étudiant en direct, sans retirer la protection anti-capture). Essai : CEI_SHARE=page.
-  shareMode: process.env.CEI_SHARE === 'page' ? 'page' : 'screen',
+  // Partage d'écran envoyé au surveillant : COMME DANS LE NAVIGATEUR, le surveillant voit l'écran réel de l'étudiant, copie d'examen comprise (1.8.0).
+  // Pour cela la fenêtre d'examen n'est plus exclue des captures (la protection anti-capture la rendait noire dans le partage : on ne voyait que le bureau).
+  // Réglage de repli CEI_PROTECT=1 : protection anti-capture rétablie ; le partage envoie alors la page d'examen elle-même (la copie reste visible).
+  protectCapture: process.env.CEI_PROTECT === '1',
+  shareMode: (process.env.CEI_PROTECT === '1' || process.env.CEI_SHARE === 'page') ? 'page' : 'screen',
   updateTest: process.env.CEI_UPDATE_TEST === '1',       // essais : autorise la mise à jour d'une application non empaquetée
 }

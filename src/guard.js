@@ -424,5 +424,13 @@ async function enforcePorts(ports, { eject = true, displaysOff = true } = {}) {
   return done
 }
 
+// Source de capture de l'ÉCRAN PRINCIPAL : celui de l'examen (les autres écrans sont recouverts). On ne prend plus « le premier de la liste », dont l'ordre
+// n'est pas garanti avec deux écrans. `sources` = résultat de desktopCapturer.getSources({types:['screen']}), `primaryId` = screen.getPrimaryDisplay().id.
+function pickScreenSource(sources, primaryId) {
+  const list = Array.isArray(sources) ? sources : []
+  return list.find(s => s && String(s.display_id) !== '' && String(s.display_id) === String(primaryId)) || list[0] || null
+}
+
 module.exports = {
+  pickScreenSource,
   parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, stopForbidden, winStopScript, helperAvailable, helperStop, helperNames, helperUpToDate, helperList, buildHelperScript, installHelper, HELPER_VERSION, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }

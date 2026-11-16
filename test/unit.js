@@ -103,6 +103,13 @@ t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'
   const { execFileSync } = require('child_process')
   const mode = e => execFileSync(process.execPath, ['-e', "process.env.CEI_SHARE=process.argv[1];console.log(require('./src/config').shareMode)", e], { cwd: require('path').join(__dirname, '..'), encoding: 'utf8' }).trim()
   t('partage : « écran » par défaut, « page » seulement si demandé (CEI_SHARE=page)', mode('') === 'screen' && mode('page') === 'page' && mode('autre') === 'screen')
+  // 1.8.0 : le surveillant voit l'écran réel de l'étudiant, copie comprise, comme dans le navigateur
+  const prot = (share, protect) => execFileSync(process.execPath, ['-e', "if(process.argv[1])process.env.CEI_SHARE=process.argv[1];if(process.argv[2])process.env.CEI_PROTECT=process.argv[2];const c=require('./src/config');console.log(c.protectCapture+'|'+c.shareMode)", share, protect], { cwd: require('path').join(__dirname, '..'), encoding: 'utf8' }).trim()
+  t('1.8.0 : par défaut la fenêtre d\'examen N\'est PAS exclue des captures (le surveillant voit la copie, comme dans le navigateur)', prot('', '') === 'false|screen')
+  t('1.8.0 : réglage de repli CEI_PROTECT=1 → protection rétablie ET partage de la page d\'examen (la copie reste visible)', prot('', '1') === 'true|page')
+  const srcs = [{ id: 'screen:0', display_id: '2' }, { id: 'screen:1', display_id: '1' }]
+  t('1.8.0 : l\'écran PRINCIPAL est partagé même s\'il n\'est pas le premier de la liste', g.pickScreenSource(srcs, 1).id === 'screen:1' && g.pickScreenSource(srcs, '2').id === 'screen:0')
+  t('1.8.0 : repli sur le premier écran si l\'identifiant est introuvable ; aucune source → null, sans erreur', g.pickScreenSource(srcs, 9).id === 'screen:0' && g.pickScreenSource([], 1) === null && g.pickScreenSource(undefined, 1) === null)
 }
 
 // 1.6.0 : TOUT logiciel interdit est arrêté ; les services résistants sont arrêtés avec les droits d'administrateur (fenêtre d'autorisation Windows)
