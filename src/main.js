@@ -557,26 +557,31 @@ async function prepareStation(kind, { auto = false, parent = null } = {}) {
     return ok ? 0 : 1
   }
   if (await guard.helperAvailable(true) && guard.helperUpToDate()) { if (!auto) await box('info', 'Cet ordinateur est déjà autorisé.', 'CEI Examen arrête déjà seul les logiciels interdits pendant un examen.'); return 0 }
-  const r = await box('question', 'CEI Examen a besoin de l\'autorisation de l\'administrateur de cet ordinateur',
-    'Une seule fois. Elle permet à CEI Examen d\'arrêter AUTOMATIQUEMENT, pendant un examen, les logiciels interdits (TeamViewer, AnyDesk, capture d\'écran, ' +
-    'visioconférence…), même ouverts en arrière-plan. Aucun autre droit n\'est accordé.\n\n' +
-    'Windows va vous demander de confirmer. Sans cette autorisation, vous devrez fermer ces logiciels vous-même avant chaque examen.', ['Autoriser', 'Plus tard'])
-  if (r.response !== 0) return 2                                     // 2 = reporté (voir maybeOfferStation)
-  const ok = await guard.installHelper('install')
-  await box(ok ? 'info' : 'warning', ok ? 'Autorisation enregistrée.' : 'L\'autorisation n\'a pas pu être enregistrée.',
-    ok ? 'CEI Examen arrêtera désormais seul les logiciels interdits pendant un examen.' : 'La confirmation de Windows a été refusée, ou ce compte n\'a pas les droits d\'administrateur de l\'ordinateur. CEI Examen vous la redemandera plus tard ; vous pouvez aussi la donner depuis le menu Démarrer → CEI Examen → Autoriser l\'arrêt automatique des logiciels interdits.')
+  // Un seul bouton : « Autoriser » (fermer la fenêtre revient au même). Sans cette autorisation les logiciels de fond et les services ne se ferment pas :
+  // elle n'est donc pas facultative. Trois essais par passage (si Windows est refusé ou si le compte n'est pas administrateur), puis on renvoie au prochain lancement.
+  let ok = false
+  for (let essai = 1; essai <= 3 && !ok; essai++) {
+    await box('question', 'CEI Examen a besoin de l\'autorisation de l\'administrateur de cet ordinateur',
+      'Une seule fois. Cette autorisation permet à CEI Examen d\'arrêter AUTOMATIQUEMENT, pendant un examen, les logiciels interdits (TeamViewer, AnyDesk, ' +
+      'capture d\'écran, visioconférence…), même ouverts en arrière-plan. Aucun autre droit n\'est accordé.\n\n' +
+      (essai > 1 ? 'La confirmation de Windows n\'a pas été donnée : cliquez sur « Oui » dans la fenêtre de Windows. Si votre compte n\'est pas administrateur, fermez cette fenêtre et ouvrez une session avec un compte administrateur de cet ordinateur.\n\n' : '') +
+      'Windows va vous demander de confirmer.', [essai > 1 ? 'Réessayer' : 'Autoriser'])
+    ok = await guard.installHelper('install')
+  }
+  if (ok) await box('info', 'Autorisation enregistrée.', 'CEI Examen arrêtera désormais seul les logiciels interdits pendant un examen.')
+  else await box('warning', 'L\'autorisation n\'a pas pu être enregistrée.', 'CEI Examen vous la redemandera à son prochain lancement. Tant qu\'elle manque, fermez vous-même les logiciels interdits (y compris ceux de la zone de notification) avant chaque examen.')
   return ok ? 0 : 1
 }
 
-/** Au lancement (hors examen) : propose l'autorisation si elle manque ou si le script a changé ; après « Plus tard » ou un refus, on ne redemande
- *  qu'au bout de 3 jours (jamais pendant un examen, jamais en essai automatique). */
+/** Au lancement (hors examen) : demande l'autorisation si elle manque ou si le script a changé, à CHAQUE lancement tant qu'elle n'est pas donnée
+ *  (jamais pendant un examen, jamais en essai automatique). */
 const stationFile = () => path.join(app.getPath('userData'), 'station.json')
 function markStationAsked() { try { fs.writeFileSync(stationFile(), JSON.stringify({ askedAt: Date.now(), version: cfg.version })) } catch { /* non fatal */ } }
 async function maybeOfferStation() {
   if (process.platform !== 'win32' || cfg.test || exam.active || !win || win.isDestroyed()) return
   let st = {}; try { st = JSON.parse(fs.readFileSync(stationFile(), 'utf8')) } catch { /* première fois */ }
   if (await guard.helperAvailable(true) && guard.helperUpToDate()) return
-  if (st.askedAt && Date.now() - st.askedAt < 3 * 86400000 && st.version === cfg.version) return
+  if (st.askedAt && Date.now() - st.askedAt < 10 * 60000) return                                  // pas deux demandes de suite (ex. juste après l'installation)
   markStationAsked()
   const code = await prepareStation('install', { auto: true, parent: win })
   log('STATION', 'proposition au lancement, code', code)
@@ -586,7 +591,7 @@ app.whenReady().then(async () => {
   if (STATION_MODE) {            // lancé par l'installateur (avec --auto : rien n'est dit si le poste est déjà autorisé) ou par le raccourci du menu Démarrer
     const auto = process.argv.includes('--auto')
     const code = await prepareStation(STATION_MODE, { auto }).catch(e => { log('ERR autorisation', e.message); return 1 })
-    if (auto && code !== 0) markStationAsked()              // « Plus tard » à l'installation : pas de seconde demande aussitôt au premier lancement
+    if (auto) markStationAsked()                            // juste après l'installation : pas de seconde demande aussitôt au premier lancement
     app.exit(code); return
   }
   const ses = session.defaultSession

@@ -145,6 +145,11 @@ t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'
     t('installateur : raccourci du menu Démarrer pour (re)donner l\'autorisation', /Autoriser l'arrêt automatique des logiciels interdits\.lnk/.test(mi))
     t('installateur : reste installable SANS droits d\'administrateur (l\'ancien système de mise à jour des versions 1.3 à 1.6 ne sait lancer qu\'un installateur sans élévation)', /RequestExecutionLevel user/.test(mi))
   }
+  {
+    const mj = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'main.js'), 'utf8')
+    t('autorisation de l\'administrateur : UN SEUL bouton « Autoriser » — aucun « Plus tard » (sans elle les logiciels de fond ne se ferment pas)', /\[essai > 1 \? 'Réessayer' : 'Autoriser'\]/.test(mj) && !/Plus tard/.test(mj))
+    t('autorisation de l\'administrateur : redemandée à chaque lancement tant qu\'elle manque (pas de délai de plusieurs jours)', !/86400000/.test(mj))
+  }
   t('aide : noms demandables assainis', JSON.stringify(g.helperNames(['TeamViewer_Service.exe', 'a b', "x';y", 'AnyDesk'])) === JSON.stringify(['teamviewer_service', 'anydesk']))
   asyncChecks = Promise.all([asyncChecks, g.helperAvailable().then(a => t('aide : « non disponible » hors Windows, aucune demande déposée', a === false)), g.helperStop(['anydesk']).then(a => t('aide : demande d\'arrêt sans effet hors Windows', a === false))])
 }
