@@ -9,6 +9,7 @@ const dist = path.join(__dirname, '..', 'dist')
 const KINDS = [
   [/\.AppImage$/, 'linux', 'Linux 64 bits (AppImage portable, sans installation)', 'x64', 'portable'],
   [/\.deb$/, 'linux', 'Linux 64 bits (paquet .deb : Ubuntu, Debian, Linux Mint — installation avec raccourci et menu)', 'x64', 'installer'],
+  [/-preparation-poste\.exe$/i, 'win32', 'Windows — préparation du poste (administrateur, UNE seule fois par ordinateur : permet à CEI Examen d\'arrêter seul les logiciels interdits)', 'x64', 'prep'],
   [/-win-installateur\.zip$/i, 'win32', 'Windows 10 / 11 (installateur dans une archive ZIP — recommandé avec Microsoft Edge)', 'x64', 'installer-zip'],
   [/-win.*\.exe$/i, 'win32', 'Windows 10 / 11 (installateur avec raccourcis)', 'x64', 'installer'],
   [/-win.*\.zip$/i, 'win32', 'Windows 10 / 11 (archive ZIP, sans installation)', 'x64', 'archive'],

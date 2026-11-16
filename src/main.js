@@ -44,6 +44,7 @@ const pending = []                       // événements en attente tant que la 
 let pageReady = false
 const timers = []
 let globalOk = []
+let helperFlag = false                       // la préparation du poste (aide administrateur) est-elle installée ? (information, voir guard.helperAvailable)
 const exam = { active: false, since: 0, maxTimer: null, blurAt: 0, lastShortcutAt: 0, forbiddenSeen: new Map(), remoteSeen: false, stuck: '', lastFocus: 'main',
   examId: 0, userId: 0, allowedSites: [], allowedApps: [] }
 let assistWin = null
@@ -235,7 +236,7 @@ function startWatchers() {
     // TOUT logiciel interdit est arrêté dès qu'il est vu (depuis la 1.6.0 : plus seulement les outils à distance et les messageries ; outil de capture,
     // enregistreurs d'écran, machines virtuelles… aussi). Ceux qui résistent (service de Windows) sont signalés à la page, qui bloque la copie.
     const toKill = [...new Set(forb)]
-    const still = toKill.length ? await guard.killProcesses(toKill) : []
+    const still = toKill.length ? await guard.stopForbidden(toKill) : []                             // arrêt normal, puis l'aide du poste (service de Windows) — sans fenêtre d'autorisation
     for (const name of forb) {
       const last = exam.forbiddenSeen.get(name) || 0
       if (Date.now() - last > 5 * 60 * 1000) {
@@ -473,7 +474,7 @@ async function checkUpdate(mode) {
 ipcMain.handle('cei:update-now', e => fromAllowed(e) ? checkUpdate('manual') : { skipped: 'denied' })
 ipcMain.handle('cei:update-info', e => fromAllowed(e) ? { version: cfg.version, updating: upd.busy } : null)
 
-ipcMain.handle('cei:info', e => fromAllowed(e) ? { client: 'CEIExamClient', version: cfg.version, platform: process.platform, arch: process.arch, examMode: exam.active, vm: vmInfo.vm } : null)
+ipcMain.handle('cei:info', e => fromAllowed(e) ? { client: 'CEIExamClient', version: cfg.version, platform: process.platform, arch: process.arch, examMode: exam.active, vm: vmInfo.vm, helper: helperFlag } : null)
 // Autorisations du système (Windows 10/11 et macOS) : caméra, micro, enregistrement de l'écran (macOS). 'granted' | 'denied' | 'not-determined' | 'unknown'
 const mediaAccess = () => {
   const get = k => { try { return systemPreferences.getMediaAccessStatus ? systemPreferences.getMediaAccessStatus(k) : 'unknown' } catch { return 'unknown' } }
@@ -499,12 +500,12 @@ ipcMain.handle('cei:sign', async (e, { nonce, userId, examId } = {}) => {
 })
 ipcMain.handle('cei:apps', async e => fromAllowed(e) ? { apps: [...new Map((await guard.listWindowApps(selfIdentity())).map(a => [a.name, a])).values()].map(a => ({ name: a.name })) } : null)
 ipcMain.handle('cei:forbidden', async e => fromAllowed(e) ? { names: await guard.forbiddenRunning() } : null)
-ipcMain.handle('cei:forbidden-stop', async e => {
+ipcMain.handle('cei:forbidden-stop', async (e, opts) => {
   if (!fromAllowed(e)) return null
   const names = await guard.forbiddenRunning()
-  const left = await guard.stopForbidden(names, { elevate: true })
-  log('FORBIDDEN STOP', names.join(','), 'left=' + left.join(','))
-  return { remaining: await guard.forbiddenRunning(), tried: names }
+  const left = await guard.stopForbidden(names, { elevate: !!(opts && opts.elevate) })   // sans `elevate` : arrêt normal puis aide du poste, jamais de fenêtre d'autorisation
+  log('FORBIDDEN STOP', names.join(','), 'elevate=' + !!(opts && opts.elevate), 'left=' + left.join(','))
+  return { remaining: await guard.forbiddenRunning(), tried: names, helper: await guard.helperAvailable() }
 })
 ipcMain.handle('cei:apps-close', async e => {
   if (!fromAllowed(e)) return null
@@ -550,6 +551,7 @@ app.whenReady().then(async () => {
   try { app.setAsDefaultProtocolClient(PROTO) } catch { /* non fatal */ }
   guard.setExtraAllow(cfg.allowApps)
   vmInfo = await guard.detectVM()
+  guard.helperAvailable().then(ok => { helperFlag = ok; log('HELPER', ok ? 'préparation du poste présente' : 'absente') }).catch(() => {})
   log('START', cfg.version, process.platform, 'vm=' + vmInfo.vm, vmInfo.hint)
   createWindow()
   if (!cfg.test) {                                         // contrôle au démarrage (avant la connexion), puis régulièrement hors examen

@@ -119,6 +119,21 @@ t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'
     g.stopForbidden([]).then(r => t('rien à arrêter : aucun processus touché', Array.isArray(r) && r.length === 0)),
   ])
 }
+
+// 1.6.0 : « Préparation du poste » (administrateur, une fois) — l'application arrête SEULE les logiciels interdits, sans fenêtre d'autorisation
+{
+  const fs = require('fs'), path = require('path')
+  const stop = fs.readFileSync(path.join(__dirname, '..', 'build', 'helper', 'cei-stop.ps1'), 'utf8')
+  const prep = fs.readFileSync(path.join(__dirname, '..', 'build', 'helper', 'prepare.ps1'), 'utf8')
+  t('aide : seuls les noms présents AUSSI dans la liste fixe forbidden.txt sont arrêtés', /\$allow -contains \$_/.test(stop) && /forbidden\.txt/.test(stop))
+  t('aide : aucun nom n\'est jamais exécuté comme commande (ni Invoke-Expression, ni iex, ni Start-Process)', !/Invoke-Expression|\biex\b|Start-Process|Invoke-Command/i.test(stop))
+  t('aide : noms assainis (lettres, chiffres, point, tiret, 60 caractères au plus)', /\^\[\\w\.\\-\]\{1,60\}\$/.test(stop))
+  t('aide : les services sont arrêtés avant les processus', stop.indexOf('Stop-Service') > 0 && stop.indexOf('Stop-Service') < stop.indexOf('Stop-Process'))
+  t('préparation : tâche SYSTEM, un utilisateur peut la LANCER (GRGX) mais ni la modifier ni la supprimer', /SYSTEM/.test(prep) && /\(A;;GRGX;;;AU\)/.test(prep) && !/\(A;;(FA|GA);;;AU\)/.test(prep))
+  t('préparation : le dossier n\'est modifiable que par SYSTEM et les administrateurs ; les utilisateurs déposent seulement des demandes', /S-1-5-18:\(OI\)\(CI\)F/.test(prep) && /S-1-5-32-544:\(OI\)\(CI\)F/.test(prep) && /S-1-5-32-545:\(OI\)\(CI\)RX/.test(prep) && /requests.*RX,WD,AD/.test(prep))
+  t('aide : noms demandables assainis', JSON.stringify(g.helperNames(['TeamViewer_Service.exe', 'a b', "x';y", 'AnyDesk'])) === JSON.stringify(['teamviewer_service', 'anydesk']))
+  asyncChecks = Promise.all([asyncChecks, g.helperAvailable().then(a => t('aide : « non disponible » hors Windows, aucune demande déposée', a === false)), g.helperStop(['anydesk']).then(a => t('aide : demande d\'arrêt sans effet hors Windows', a === false))])
+}
 asyncChecks.then(() => {
 console.log(`\n${ok}/${ok + ko} vérifications réussies`)
   process.exit(ko ? 1 : 0)

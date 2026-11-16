@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('ceiClient', {
   askMedia: () => ipcRenderer.invoke('cei:ask-media'),
   listApps: () => ipcRenderer.invoke('cei:apps'),
   forbidden: () => ipcRenderer.invoke('cei:forbidden'),                 // logiciels interdits (contrôle à distance, capture d'écran, visio…) actuellement lancés
-  stopForbidden: () => ipcRenderer.invoke('cei:forbidden-stop'),        // les arrête (avec demande d'autorisation administrateur de Windows si besoin)
+  stopForbidden: opts => ipcRenderer.invoke('cei:forbidden-stop', opts || {}),   // les arrête : seul / aide du poste ; { elevate: true } = + demande d'autorisation administrateur Windows
   closeApps: () => ipcRenderer.invoke('cei:apps-close'),
   enterExamMode: opts => ipcRenderer.invoke('cei:enter', opts || {}),
   configure: opts => ipcRenderer.invoke('cei:configure', opts || {}),      // identité de l'examen, sites d'assistance et applications tolérées (avant l'entrée en mode examen)

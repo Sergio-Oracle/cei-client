@@ -3,6 +3,7 @@
 const { execFile } = require('child_process')
 const fs = require('fs')
 const os = require('os')
+const path = require('path')
 
 const norm = n => String(n || '').toLowerCase().replace(/\.(exe|app)$/, '').trim()
 let extraAllow = new Set()           // applications épargnées pour CET examen (réglage de l'examen + CEI_ALLOW_APPS)
@@ -92,12 +93,45 @@ function winStopScript(names) {
     `Stop-Process -Id $id -Force -ErrorAction SilentlyContinue}`
 }
 
-/** Arrête des logiciels interdits PAR TOUS LES MOYENS : arrêt normal, puis (Windows, `elevate`) arrêt avec droits d'administrateur — Windows demande
+// ── Aide installée par un administrateur (« Préparation du poste », une fois par ordinateur) ───────────────────────────────────────────────────
+// Un étudiant sans droits d'administrateur ne peut pas arrêter un SERVICE de Windows (TeamViewer, AnyDesk…) ni répondre à une fenêtre d'autorisation.
+// La préparation du poste crée une tâche planifiée « CEI Examen Arret » (compte SYSTEM) que tout utilisateur peut DÉCLENCHER mais pas modifier :
+// l'application y dépose les noms à arrêter (fichier dans « requests »), la tâche n'arrête que ceux qui figurent aussi dans la liste fixe forbidden.txt.
+const HELPER_TASK = 'CEI Examen Arret'
+const helperDir = () => path.join(process.env.ProgramData || 'C:\\ProgramData', 'CEI Examen')
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+let helperCache = { at: 0, ok: false }
+
+/** Noms demandables à l'aide : assainis (les mêmes caractères que ceux que la tâche accepte). */
+function helperNames(names) { return [...new Set((names || []).map(norm).filter(n => /^[\w.\-]{1,60}$/.test(n)))] }
+
+/** L'aide est-elle installée sur ce poste ? (Windows seulement ; résultat gardé 60 s.) */
+async function helperAvailable() {
+  if (process.platform !== 'win32') return false
+  if (Date.now() - helperCache.at < 60000) return helperCache.ok
+  let ok = false
+  try { ok = fs.existsSync(path.join(helperDir(), 'requests')) && fs.existsSync(path.join(helperDir(), 'forbidden.txt')) && !!(await run('schtasks', ['/query', '/tn', HELPER_TASK], 5000)) } catch { ok = false }
+  helperCache = { at: Date.now(), ok }
+  return ok
+}
+
+/** Demande à l'aide d'arrêter ces logiciels (sans fenêtre d'autorisation). Retourne false si l'aide n'est pas là. */
+async function helperStop(names) {
+  const list = helperNames(names)
+  if (!list.length || !(await helperAvailable())) return false
+  try { fs.writeFileSync(path.join(helperDir(), 'requests', `${process.pid}-${Date.now()}.req`), list.join('\n')) } catch { return false }
+  await run('schtasks', ['/run', '/tn', HELPER_TASK], 8000)
+  await sleep(2500)                                          // la tâche s'exécute en quelques secondes
+  return true
+}
+
+/** Arrête des logiciels interdits PAR TOUS LES MOYENS : arrêt normal, puis l'aide de la préparation du poste (sans demande d'autorisation), puis (Windows, `elevate`) arrêt avec droits d'administrateur — Windows demande
  *  alors à l'étudiant d'AUTORISER l'opération (fenêtre UAC). Refus ou compte sans droits : le logiciel reste, il est retourné. Retourne ce qui tourne encore. */
 async function stopForbidden(names, { elevate = false } = {}) {
   const list = [...new Set((names || []).map(norm).filter(Boolean))]
   if (!list.length) return []
   let left = await killProcesses(list)
+  if (left.length && await helperStop(left)) left = await killProcesses(left)
   if (left.length && elevate && process.platform === 'win32') {
     const script = winStopScript(left)
     if (script) {
@@ -358,4 +392,4 @@ async function enforcePorts(ports, { eject = true, displaysOff = true } = {}) {
 }
 
 module.exports = {
-  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, stopForbidden, winStopScript, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
+  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, stopForbidden, winStopScript, helperAvailable, helperStop, helperNames, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
