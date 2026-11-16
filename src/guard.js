@@ -98,6 +98,7 @@ function winStopScript(names) {
 // La préparation du poste crée une tâche planifiée « CEI Examen Arret » (compte SYSTEM) que tout utilisateur peut DÉCLENCHER mais pas modifier :
 // l'application y dépose les noms à arrêter (fichier dans « requests »), la tâche n'arrête que ceux qui figurent aussi dans la liste fixe forbidden.txt.
 const HELPER_TASK = 'CEI Examen Arret'
+const HELPER_VERSION = '1'          // monter ce numéro quand cei-stop.ps1 ou la logique de la tâche change : les postes sont alors re-préparés
 const helperDir = () => path.join(process.env.ProgramData || 'C:\\ProgramData', 'CEI Examen')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 let helperCache = { at: 0, ok: false }
@@ -106,13 +107,45 @@ let helperCache = { at: 0, ok: false }
 function helperNames(names) { return [...new Set((names || []).map(norm).filter(n => /^[\w.\-]{1,60}$/.test(n)))] }
 
 /** L'aide est-elle installée sur ce poste ? (Windows seulement ; résultat gardé 60 s.) */
-async function helperAvailable() {
+async function helperAvailable(force = false) {
   if (process.platform !== 'win32') return false
-  if (Date.now() - helperCache.at < 60000) return helperCache.ok
+  if (!force && Date.now() - helperCache.at < 60000) return helperCache.ok
   let ok = false
   try { ok = fs.existsSync(path.join(helperDir(), 'requests')) && fs.existsSync(path.join(helperDir(), 'forbidden.txt')) && !!(await run('schtasks', ['/query', '/tn', HELPER_TASK], 5000)) } catch { ok = false }
   helperCache = { at: Date.now(), ok }
   return ok
+}
+
+/** La préparation du poste présente est-elle à jour (même version que celle de cette application) ? */
+function helperUpToDate() {
+  try { return fs.readFileSync(path.join(helperDir(), 'version.txt'), 'utf8').trim() === HELPER_VERSION } catch { return false }
+}
+
+/** Noms de la liste fixe écrite sur le poste (ceux que la tâche a le droit d'arrêter). */
+function helperList() {
+  return [...new Set([...FORBIDDEN, ...REMOTE_TOOLS, ...BACKGROUND_APPS].map(norm).filter(n => /^[\w.\-]{1,60}$/.test(n)))].sort()
+}
+
+/** Texte COMPLET du script de préparation (exécuté avec les droits d'administrateur) : tout est inclus dans la commande, rien n'est relu sur le disque
+ *  au moment de l'élévation (un fichier modifiable par l'utilisateur ne peut donc pas être substitué entre-temps). */
+function buildHelperScript(kind = 'install') {
+  const dir = path.join(__dirname, 'helper')
+  if (kind === 'remove') return fs.readFileSync(path.join(dir, 'remove.ps1.tpl'), 'utf8').replace(/^\uFEFF/, '')
+  const stop = fs.readFileSync(path.join(dir, 'cei-stop.ps1'), 'utf8').replace(/^\uFEFF/, '').replace(/\r?\n$/, '')
+  if (/^'@/m.test(stop)) throw new Error('cei-stop.ps1 contient une fin de bloc de texte')
+  return fs.readFileSync(path.join(dir, 'install.ps1.tpl'), 'utf8').replace(/^\uFEFF/, '')
+    .replace('{{STOP_SCRIPT}}', () => stop).replace('{{FORBIDDEN}}', () => helperList().join('\r\n')).replace('{{VERSION}}', HELPER_VERSION)
+}
+
+/** Installe (ou retire) la préparation du poste : Windows demande l'autorisation d'un administrateur (une fois). Retourne true si l'aide est en place ensuite. */
+async function installHelper(kind = 'install') {
+  if (process.platform !== 'win32') return false
+  const enc = Buffer.from(buildHelperScript(kind), 'utf16le').toString('base64')
+  await run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+    `Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${enc}'`], 180000)
+  helperCache = { at: 0, ok: false }
+  const there = await helperAvailable(true)
+  return kind === 'remove' ? !there : (there && helperUpToDate())
 }
 
 /** Demande à l'aide d'arrêter ces logiciels (sans fenêtre d'autorisation). Retourne false si l'aide n'est pas là. */
@@ -392,4 +425,4 @@ async function enforcePorts(ports, { eject = true, displaysOff = true } = {}) {
 }
 
 module.exports = {
-  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, stopForbidden, winStopScript, helperAvailable, helperStop, helperNames, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
+  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, stopForbidden, winStopScript, helperAvailable, helperStop, helperNames, helperUpToDate, helperList, buildHelperScript, installHelper, HELPER_VERSION, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }

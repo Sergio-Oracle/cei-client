@@ -123,14 +123,22 @@ t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'
 // 1.6.0 : « Préparation du poste » (administrateur, une fois) — l'application arrête SEULE les logiciels interdits, sans fenêtre d'autorisation
 {
   const fs = require('fs'), path = require('path')
-  const stop = fs.readFileSync(path.join(__dirname, '..', 'build', 'helper', 'cei-stop.ps1'), 'utf8')
-  const prep = fs.readFileSync(path.join(__dirname, '..', 'build', 'helper', 'prepare.ps1'), 'utf8')
+  const stop = fs.readFileSync(path.join(__dirname, '..', 'src', 'helper', 'cei-stop.ps1'), 'utf8')
+  const prep = g.buildHelperScript('install')
   t('aide : seuls les noms présents AUSSI dans la liste fixe forbidden.txt sont arrêtés', /\$allow -contains \$_/.test(stop) && /forbidden\.txt/.test(stop))
   t('aide : aucun nom n\'est jamais exécuté comme commande (ni Invoke-Expression, ni iex, ni Start-Process)', !/Invoke-Expression|\biex\b|Start-Process|Invoke-Command/i.test(stop))
   t('aide : noms assainis (lettres, chiffres, point, tiret, 60 caractères au plus)', /\^\[\\w\.\\-\]\{1,60\}\$/.test(stop))
   t('aide : les services sont arrêtés avant les processus', stop.indexOf('Stop-Service') > 0 && stop.indexOf('Stop-Service') < stop.indexOf('Stop-Process'))
   t('préparation : tâche SYSTEM, un utilisateur peut la LANCER (GRGX) mais ni la modifier ni la supprimer', /SYSTEM/.test(prep) && /\(A;;GRGX;;;AU\)/.test(prep) && !/\(A;;(FA|GA);;;AU\)/.test(prep))
   t('préparation : le dossier n\'est modifiable que par SYSTEM et les administrateurs ; les utilisateurs déposent seulement des demandes', /S-1-5-18:\(OI\)\(CI\)F/.test(prep) && /S-1-5-32-544:\(OI\)\(CI\)F/.test(prep) && /S-1-5-32-545:\(OI\)\(CI\)RX/.test(prep) && /requests.*RX,WD,AD/.test(prep))
+  {
+    const full = g.buildHelperScript('install')
+    t('préparation : tout est DANS la commande (aucun fichier relu au moment de l\'élévation) et aucun marqueur laissé', !/\{\{[A-Z_]+\}\}/.test(full) && /\$stop = @'/.test(full) && /\$names = @'/.test(full) && !/Get-Content|\. \.\\|Invoke-Expression|DownloadString/i.test(full.split("$stop = @'")[0]))
+    t('préparation : la liste fixe contient TeamViewer, AnyDesk, l\'outil de capture, Teams (et seulement des noms sûrs)', ['teamviewer_service', 'anydesk', 'snippingtool', 'ms-teams', 'zoom'].every(n => full.includes('\n' + n + '\r\n') || full.includes('\n' + n + '\n')) && g.helperList().every(n => /^[\w.\-]{1,60}$/.test(n)))
+    t('préparation : version écrite sur le poste (re-préparation quand le script change)', full.includes("'" + g.HELPER_VERSION + "'") && /version\.txt/.test(full))
+    t('retrait : désenregistre la tâche et supprime le dossier', /Unregister-ScheduledTask/.test(g.buildHelperScript('remove')) && /Remove-Item/.test(g.buildHelperScript('remove')))
+    t('préparation : le fichier du SYSTEM n\'est écrit qu\'APRÈS la mise en place des droits (aucune fenêtre où un utilisateur pourrait le modifier)', full.indexOf('icacls.exe $dir') > 0 && full.indexOf('icacls.exe $dir') < full.indexOf('Set-Content -LiteralPath (Join-Path $dir \'cei-stop.ps1\')'))
+  }
   t('aide : noms demandables assainis', JSON.stringify(g.helperNames(['TeamViewer_Service.exe', 'a b', "x';y", 'AnyDesk'])) === JSON.stringify(['teamviewer_service', 'anydesk']))
   asyncChecks = Promise.all([asyncChecks, g.helperAvailable().then(a => t('aide : « non disponible » hors Windows, aucune demande déposée', a === false)), g.helperStop(['anydesk']).then(a => t('aide : demande d\'arrêt sans effet hors Windows', a === false))])
 }

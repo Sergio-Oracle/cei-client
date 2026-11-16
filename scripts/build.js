@@ -56,7 +56,7 @@ for (const t of wanted) {
     run('python3', ['-c', 'import sys,os,zipfile\nsrc,dst=sys.argv[1:3]\nz=zipfile.ZipFile(dst,"w",zipfile.ZIP_DEFLATED)\nfor r,_,fs in os.walk(src):\n  for f in fs:\n    p=os.path.join(r,f); z.write(p,os.path.relpath(p,src))\nz.close()', path.join(root, 'dist', 'win-unpacked'), zipPath])
   }
   if (t === 'win') {                                          // installateur Windows (raccourcis, désinstallation) : NSIS direct, sans Wine
-    if (spawnSync('makensis', ['-VERSION']).status === 0) { run('node', ['scripts/make-installer.js']); run('node', ['scripts/make-prep.js']) }
+    if (spawnSync('makensis', ['-VERSION']).status === 0) run('node', ['scripts/make-installer.js'])
     else console.log('ℹ  makensis absent : seule l\'archive ZIP Windows est produite (apt install nsis pour l\'installateur).')
   }
 }

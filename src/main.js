@@ -33,7 +33,9 @@ if (process.platform === 'linux' && process.env.APPIMAGE) {
 }
 if (process.env.CEI_USERDATA) app.setPath('userData', process.env.CEI_USERDATA)      // essais : profil jetable
 if (process.platform === 'win32') app.setAppUserModelId('sn.unchk.cei.examen')   // icône et regroupement corrects dans la barre des tâches
-if (!cfg.test && !app.requestSingleInstanceLock()) { app.quit() }
+// Modes sans fenêtre d'examen : « --prepare-poste » / « --retirer-poste » (lancés par l'installateur ou le menu Démarrer, voir prepareStation).
+const STATION_MODE = process.argv.includes('--prepare-poste') ? 'install' : process.argv.includes('--retirer-poste') ? 'remove' : ''
+if (!cfg.test && !STATION_MODE && !app.requestSingleInstanceLock()) { app.quit() }
 
 let win = null
 let quitWin = null
@@ -536,7 +538,35 @@ app.on('before-quit', e => { if (exam.active && !allowQuit) e.preventDefault() }
 app.on('session-end', () => { allowQuit = true })
 app.on('window-all-closed', () => { if (!exam.active || allowQuit) app.quit() })
 
+/** Préparation du poste (une fois par ordinateur, sous la responsabilité de quelqu'un qui a les droits d'administrateur — le technicien de la salle,
+ *  à l'installation) : permet à CEI Examen d'arrêter SEUL les logiciels interdits, services compris, chez un étudiant sans droits d'administrateur.
+ *  Windows demande l'autorisation de l'administrateur (une seule fenêtre). Équivalent de ce que fait Safe Exam Browser avec ses droits d'installation. */
+async function prepareStation(kind) {
+  const { dialog } = require('electron')
+  const box = (type, message, detail, buttons) => dialog.showMessageBox({ type, title: 'CEI Examen — préparation du poste', message, detail, buttons: buttons || ['OK'], defaultId: 0, cancelId: (buttons || ['OK']).length - 1 })
+  if (process.platform !== 'win32') { await box('info', 'La préparation du poste ne concerne que Windows.'); return 0 }
+  if (kind === 'remove') {
+    const r = await box('question', 'Retirer la préparation de ce poste ?', 'CEI Examen ne pourra plus arrêter seul les services interdits (TeamViewer, AnyDesk…). Windows demandera l\'autorisation d\'un administrateur.', ['Retirer', 'Annuler'])
+    if (r.response !== 0) return 0
+    const ok = await guard.installHelper('remove')
+    await box(ok ? 'info' : 'warning', ok ? 'Préparation retirée.' : 'Le retrait n\'a pas pu être fait (autorisation refusée).')
+    return ok ? 0 : 1
+  }
+  if (await guard.helperAvailable(true) && guard.helperUpToDate()) { await box('info', 'Ce poste est déjà préparé.', 'CEI Examen arrête déjà seul les logiciels interdits pendant un examen.'); return 0 }
+  const r = await box('question', 'Préparer ce poste pour les examens ?',
+    'À faire UNE SEULE FOIS par ordinateur, par une personne qui a les droits d\'administrateur (le technicien de la salle).\n\n' +
+    'CEI Examen pourra ensuite arrêter SEUL, pendant un examen, les logiciels interdits (TeamViewer, AnyDesk, capture d\'écran, visioconférence…), ' +
+    'même en tâche de fond et même pour un étudiant sans droits d\'administrateur. Aucun autre droit n\'est accordé.\n\n' +
+    'Windows va demander l\'autorisation d\'un administrateur.\n\nÉtudiant sans droits d\'administrateur sur cet ordinateur : choisissez « Plus tard ».', ['Préparer ce poste', 'Plus tard'])
+  if (r.response !== 0) return 0
+  const ok = await guard.installHelper('install')
+  await box(ok ? 'info' : 'warning', ok ? 'Poste préparé.' : 'La préparation n\'a pas pu être faite.',
+    ok ? 'CEI Examen arrêtera désormais seul les logiciels interdits pendant un examen.' : 'L\'autorisation a été refusée ou ce compte n\'a pas les droits d\'administrateur. Vous pourrez la refaire : menu Démarrer → CEI Examen → Préparer le poste (administrateur).')
+  return ok ? 0 : 1
+}
+
 app.whenReady().then(async () => {
+  if (STATION_MODE) { const code = await prepareStation(STATION_MODE).catch(e => { log('ERR préparation', e.message); return 1 }); app.exit(code); return }
   const ses = session.defaultSession
   const okPerm = new Set(['media', 'display-capture', 'fullscreen', 'notifications', 'clipboard-sanitized-write', 'keyboardLock', 'window-management', 'speaker-selection', 'pointerLock'])
   ses.setPermissionRequestHandler((wc, perm, cb) => cb(okPerm.has(perm) && isAllowed(wc.getURL())))
