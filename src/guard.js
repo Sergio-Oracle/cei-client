@@ -16,7 +16,7 @@ const FORBIDDEN = new Set([
   'zoom', 'zoom.us', 'skype', 'skypeapp', 'teams', 'ms-teams', 'discord', 'slack', 'telegram', 'whatsapp', 'signal', 'webex', 'anydesk-service',
   // enregistrement / capture d'écran
   'obs', 'obs64', 'obs32', 'obs-studio', 'streamlabs', 'bandicam', 'camtasia', 'camtasiastudio', 'sharex', 'snagit32', 'snagiteditor', 'loom',
-  'screenrec', 'snippingtool', 'screenclippinghost', 'kazam', 'simplescreenrecorder', 'peek', 'flameshot', 'spectacle', 'gnome-screenshot',
+  'screenrec', 'snippingtool', 'screenclippinghost', 'screensketch', 'snipandsketch', 'kazam', 'simplescreenrecorder', 'peek', 'flameshot', 'spectacle', 'gnome-screenshot',
   // virtualisation hôte
   'vmware', 'vmware-vmx', 'vmplayer', 'virtualbox', 'virtualboxvm', 'vboxsvc', 'qemu-system-x86_64', 'prl_client_app',
 ])
@@ -79,6 +79,35 @@ async function killProcesses(names) {
   await new Promise(r => setTimeout(r, 600))
   const wanted = new Set(names.map(norm))
   return [...new Set((await listProcesses()).map(norm).filter(n => wanted.has(n)))]
+}
+
+/** Windows : script PowerShell, exécuté AVEC élévation, qui arrête d'abord les SERVICES portés par ces processus (sinon le gestionnaire de
+ *  services les relance aussitôt : TeamViewer_Service, AnyDesk…), puis les processus eux-mêmes. Les noms viennent de la liste interdite et sont assainis. */
+function winStopScript(names) {
+  const safe = [...new Set((names || []).map(norm).filter(n => /^[\w.\-]{1,60}$/.test(n)))]
+  if (!safe.length) return ''
+  return `$n=@(${safe.map(n => `'${n}'`).join(',')});` +
+    `Get-Process|Where-Object{$n -contains $_.ProcessName.ToLower()}|ForEach-Object{$id=$_.Id;` +
+    `Get-CimInstance Win32_Service -Filter "ProcessId=$id"|ForEach-Object{Stop-Service -Name $_.Name -Force -ErrorAction SilentlyContinue};` +
+    `Stop-Process -Id $id -Force -ErrorAction SilentlyContinue}`
+}
+
+/** Arrête des logiciels interdits PAR TOUS LES MOYENS : arrêt normal, puis (Windows, `elevate`) arrêt avec droits d'administrateur — Windows demande
+ *  alors à l'étudiant d'AUTORISER l'opération (fenêtre UAC). Refus ou compte sans droits : le logiciel reste, il est retourné. Retourne ce qui tourne encore. */
+async function stopForbidden(names, { elevate = false } = {}) {
+  const list = [...new Set((names || []).map(norm).filter(Boolean))]
+  if (!list.length) return []
+  let left = await killProcesses(list)
+  if (left.length && elevate && process.platform === 'win32') {
+    const script = winStopScript(left)
+    if (script) {
+      const enc = Buffer.from(script, 'utf16le').toString('base64')
+      await run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+        `Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile','-EncodedCommand','${enc}'`], 120000)
+      left = await killProcesses(left)
+    }
+  }
+  return left
 }
 
 /** Arrête les outils de contrôle à distance. Retourne ce qui tourne encore. */
@@ -329,4 +358,4 @@ async function enforcePorts(ports, { eject = true, displaysOff = true } = {}) {
 }
 
 module.exports = {
-  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }
+  parseWinMonitors, parseXrandr, parseMacDisplays, parseWinUsbLetters, parseMacExternalDisks, parseLsblk, detectPorts, enforcePorts, forbiddenRunning, remoteToolsIn, killRemoteTools, killProcesses, stopForbidden, winStopScript, BACKGROUND_APPS, remoteFromSignals, detectRemoteSession, REMOTE_TOOLS, detectVM, listProcesses, listWindowApps, closeApps, WIN_APPS_PS, setExtraAllow, parseWinApps, parseMacApps, selectApps, FORBIDDEN, hostname: os.hostname() }

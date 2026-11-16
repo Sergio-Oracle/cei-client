@@ -2,6 +2,7 @@
 // Essais sans écran : lecture des listes d'applications de Windows et de macOS (exemples réels) et règles d'autorisation.
 const g = require('../src/guard')
 let ok = 0, ko = 0
+let asyncChecks = Promise.resolve()
 const t = (n, c) => { c ? ok++ : ko++; console.log((c ? '  ✔ ' : '  ✘ ') + n) }
 const self = { pids: new Set([111]), names: new Set(['cei examen', 'electron']) }
 
@@ -103,6 +104,23 @@ t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'
   const mode = e => execFileSync(process.execPath, ['-e', "process.env.CEI_SHARE=process.argv[1];console.log(require('./src/config').shareMode)", e], { cwd: require('path').join(__dirname, '..'), encoding: 'utf8' }).trim()
   t('partage : « écran » par défaut, « page » seulement si demandé (CEI_SHARE=page)', mode('') === 'screen' && mode('page') === 'page' && mode('autre') === 'screen')
 }
+
+// 1.6.0 : TOUT logiciel interdit est arrêté ; les services résistants sont arrêtés avec les droits d'administrateur (fenêtre d'autorisation Windows)
+{
+  const sc = g.winStopScript(['TeamViewer_Service.exe', 'AnyDesk', "x';Remove-Item C:\\ -Recurse;'", 'a b', '$(calc)'])
+  t('arrêt administrateur : script limité aux noms sûrs (TeamViewer_Service, AnyDesk), aucune injection', /@\('teamviewer_service','anydesk'\)/.test(sc) && !/Remove-Item|calc|a b/.test(sc))
+  t('arrêt administrateur : les SERVICES sont arrêtés avant les processus (sinon relancés)', sc.indexOf('Stop-Service') > 0 && sc.indexOf('Stop-Service') < sc.indexOf('Stop-Process'))
+  t('arrêt administrateur : aucun nom valide => script vide (rien n\'est lancé)', g.winStopScript(['', '$(x)', null]) === '')
+  g.setExtraAllow([])
+  asyncChecks = Promise.all([
+    g.forbiddenRunning(['TeamViewer_Service.exe', 'AnyDesk.exe', 'SnippingTool.exe', 'ScreenSketch.exe', 'notepad.exe', 'obs64.exe']).then(f => {
+      t('détectés : TeamViewer (service), AnyDesk, outil de capture (ancien et nouveau), OBS ; pas le Bloc-notes', ['teamviewer_service', 'anydesk', 'snippingtool', 'screensketch', 'obs64'].every(n => f.includes(n)) && !f.includes('notepad'))
+    }),
+    g.stopForbidden([]).then(r => t('rien à arrêter : aucun processus touché', Array.isArray(r) && r.length === 0)),
+  ])
+}
+asyncChecks.then(() => {
 console.log(`\n${ok}/${ok + ko} vérifications réussies`)
   process.exit(ko ? 1 : 0)
+})
 }))

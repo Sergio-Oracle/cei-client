@@ -44,7 +44,7 @@ const pending = []                       // événements en attente tant que la 
 let pageReady = false
 const timers = []
 let globalOk = []
-const exam = { active: false, since: 0, maxTimer: null, blurAt: 0, lastShortcutAt: 0, forbiddenSeen: new Map(), remoteSeen: false, lastFocus: 'main',
+const exam = { active: false, since: 0, maxTimer: null, blurAt: 0, lastShortcutAt: 0, forbiddenSeen: new Map(), remoteSeen: false, stuck: '', lastFocus: 'main',
   examId: 0, userId: 0, allowedSites: [], allowedApps: [] }
 let assistWin = null
 
@@ -232,15 +232,22 @@ function startWatchers() {
     const procs = await guard.listProcesses()
     const remote = guard.remoteToolsIn(procs)
     const forb = await guard.forbiddenRunning(procs)
-    const bg = forb.filter(n => guard.BACKGROUND_APPS.has(n))                                      // messageries / visio laissées en tâche de fond
-    const toKill = [...new Set([...remote, ...bg])]
-    const still = toKill.length ? await guard.killProcesses(toKill) : []                           // arrêtés aussitôt, pas seulement signalés
+    // TOUT logiciel interdit est arrêté dès qu'il est vu (depuis la 1.6.0 : plus seulement les outils à distance et les messageries ; outil de capture,
+    // enregistreurs d'écran, machines virtuelles… aussi). Ceux qui résistent (service de Windows) sont signalés à la page, qui bloque la copie.
+    const toKill = [...new Set(forb)]
+    const still = toKill.length ? await guard.killProcesses(toKill) : []
     for (const name of forb) {
       const last = exam.forbiddenSeen.get(name) || 0
       if (Date.now() - last > 5 * 60 * 1000) {
         exam.forbiddenSeen.set(name, Date.now())
         report('client_forbidden_app', { name, remote_tool: remote.includes(name), killed: toKill.includes(name) && !still.includes(name) })
       }
+    }
+    const stuck = [...new Set(still)].sort().join(',')
+    if (stuck !== exam.stuck) {
+      if (stuck) report('client_forbidden_persist', { names: stuck.split(',') })
+      else report('client_forbidden_cleared', {})
+      exam.stuck = stuck
     }
     const rs = await guard.detectRemoteSession()
     if (rs.remote && !exam.remoteSeen) { exam.remoteSeen = true; report('client_remote_session', { hint: rs.hint }) }
@@ -256,7 +263,7 @@ function enterExamMode(opts = {}) {
   const { maxMinutes = 240 } = opts
   applyExamConfig(opts)
   if (exam.active || !win) return { ok: true, already: true }
-  exam.active = true; exam.since = Date.now(); exam.forbiddenSeen.clear(); exam.remoteSeen = false
+  exam.active = true; exam.since = Date.now(); exam.forbiddenSeen.clear(); exam.remoteSeen = false; exam.stuck = ''
   try { win.setKiosk(true) } catch { win.setFullScreen(true) }
   const tryDo = fn => { try { fn() } catch { /* option non disponible sur ce système */ } }
   tryDo(() => win.setAlwaysOnTop(true, 'screen-saver'))
@@ -491,6 +498,14 @@ ipcMain.handle('cei:sign', async (e, { nonce, userId, examId } = {}) => {
     displays: pt.displays, usb_storage: pt.usb.length }
 })
 ipcMain.handle('cei:apps', async e => fromAllowed(e) ? { apps: [...new Map((await guard.listWindowApps(selfIdentity())).map(a => [a.name, a])).values()].map(a => ({ name: a.name })) } : null)
+ipcMain.handle('cei:forbidden', async e => fromAllowed(e) ? { names: await guard.forbiddenRunning() } : null)
+ipcMain.handle('cei:forbidden-stop', async e => {
+  if (!fromAllowed(e)) return null
+  const names = await guard.forbiddenRunning()
+  const left = await guard.stopForbidden(names, { elevate: true })
+  log('FORBIDDEN STOP', names.join(','), 'left=' + left.join(','))
+  return { remaining: await guard.forbiddenRunning(), tried: names }
+})
 ipcMain.handle('cei:apps-close', async e => {
   if (!fromAllowed(e)) return null
   const self = selfIdentity()
