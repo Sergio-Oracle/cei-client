@@ -61,7 +61,7 @@ Section "Installation"
   CreateDirectory "$SMPROGRAMS\\CEI Examen"
   CreateShortcut "$SMPROGRAMS\\CEI Examen\\CEI Examen.lnk" "$INSTDIR\\\${EXE}"
   CreateShortcut "$SMPROGRAMS\\CEI Examen\\Désinstaller CEI Examen.lnk" "$INSTDIR\\Désinstaller CEI Examen.exe"
-  CreateShortcut "$SMPROGRAMS\\CEI Examen\\Préparer le poste (administrateur).lnk" "$INSTDIR\\\${EXE}" "--prepare-poste"
+  CreateShortcut "$SMPROGRAMS\\CEI Examen\\Autoriser l'arrêt automatique des logiciels interdits.lnk" "$INSTDIR\\\${EXE}" "--prepare-poste"
   WriteRegStr HKCU "Software\\CEI Examen" "InstallDir" "$INSTDIR"
   ; Applications installées (Paramètres Windows)
   WriteRegStr HKCU "\${KEY}" "DisplayName" "\${APP}"
@@ -81,10 +81,10 @@ Section "Installation"
   WriteRegStr HKCU "Software\\Classes\\ceiexamen" "URL Protocol" ""
   WriteRegStr HKCU "Software\\Classes\\ceiexamen\\DefaultIcon" "" "$INSTDIR\\\${EXE},0"
   WriteRegStr HKCU "Software\\Classes\\ceiexamen\\shell\\open\\command" "" '"$INSTDIR\\\${EXE}" "%1"'
-  ; Préparation du poste (une fois par ordinateur, par quelqu'un qui a les droits d'administrateur) : proposée à la fin d'une installation
+  ; Autorisation de l'administrateur (une fois par ordinateur) : demandée à la fin de l'installation, comme Safe Exam Browser, pour pouvoir arrêter les logiciels interdits ; proposée à la fin d'une installation
   ; interactive — jamais pendant une mise à jour automatique silencieuse. Déjà préparé : rien ne s'affiche.
   IfSilent +2
-    ExecWait '"$INSTDIR\\\${EXE}" --prepare-poste'
+    ExecWait '"$INSTDIR\\\${EXE}" --prepare-poste --auto'
 SectionEnd
 
 Section "Uninstall"

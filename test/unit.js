@@ -139,6 +139,12 @@ t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'
     t('retrait : désenregistre la tâche et supprime le dossier', /Unregister-ScheduledTask/.test(g.buildHelperScript('remove')) && /Remove-Item/.test(g.buildHelperScript('remove')))
     t('préparation : le fichier du SYSTEM n\'est écrit qu\'APRÈS la mise en place des droits (aucune fenêtre où un utilisateur pourrait le modifier)', full.indexOf('icacls.exe $dir') > 0 && full.indexOf('icacls.exe $dir') < full.indexOf('Set-Content -LiteralPath (Join-Path $dir \'cei-stop.ps1\')'))
   }
+  {
+    const mi = require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'make-installer.js'), 'utf8')
+    t('installateur : l\'autorisation de l\'administrateur est demandée en fin d\'installation interactive, jamais pendant une mise à jour silencieuse', /IfSilent \+2\s+ExecWait '[^\n]*--prepare-poste --auto'/.test(mi))
+    t('installateur : raccourci du menu Démarrer pour (re)donner l\'autorisation', /Autoriser l'arrêt automatique des logiciels interdits\.lnk/.test(mi))
+    t('installateur : reste installable SANS droits d\'administrateur (l\'ancien système de mise à jour des versions 1.3 à 1.6 ne sait lancer qu\'un installateur sans élévation)', /RequestExecutionLevel user/.test(mi))
+  }
   t('aide : noms demandables assainis', JSON.stringify(g.helperNames(['TeamViewer_Service.exe', 'a b', "x';y", 'AnyDesk'])) === JSON.stringify(['teamviewer_service', 'anydesk']))
   asyncChecks = Promise.all([asyncChecks, g.helperAvailable().then(a => t('aide : « non disponible » hors Windows, aucune demande déposée', a === false)), g.helperStop(['anydesk']).then(a => t('aide : demande d\'arrêt sans effet hors Windows', a === false))])
 }

@@ -538,35 +538,57 @@ app.on('before-quit', e => { if (exam.active && !allowQuit) e.preventDefault() }
 app.on('session-end', () => { allowQuit = true })
 app.on('window-all-closed', () => { if (!exam.active || allowQuit) app.quit() })
 
-/** Préparation du poste (une fois par ordinateur, sous la responsabilité de quelqu'un qui a les droits d'administrateur — le technicien de la salle,
- *  à l'installation) : permet à CEI Examen d'arrêter SEUL les logiciels interdits, services compris, chez un étudiant sans droits d'administrateur.
- *  Windows demande l'autorisation de l'administrateur (une seule fenêtre). Équivalent de ce que fait Safe Exam Browser avec ses droits d'installation. */
-async function prepareStation(kind) {
+/** Autorisation de l'administrateur de l'ordinateur (UNE fois) : permet à CEI Examen d'arrêter SEUL, pendant un examen, les logiciels interdits — services et
+ *  tâches de fond compris (TeamViewer, AnyDesk, capture d'écran, visioconférence…) — sans aucune autre demande ensuite. C'est ce que fait Safe Exam Browser
+ *  grâce aux droits demandés à son installation. Proposée à la fin de l'installation, puis au premier lancement après une mise à jour automatique silencieuse
+ *  (qui, elle, ne peut pas afficher de fenêtre d'autorisation). Les étudiants installent eux-mêmes CEI Examen sur leur ordinateur : ils confirment la fenêtre de Windows. */
+async function prepareStation(kind, { auto = false, parent = null } = {}) {
   const { dialog } = require('electron')
-  const box = (type, message, detail, buttons) => dialog.showMessageBox({ type, title: 'CEI Examen — préparation du poste', message, detail, buttons: buttons || ['OK'], defaultId: 0, cancelId: (buttons || ['OK']).length - 1 })
-  if (process.platform !== 'win32') { await box('info', 'La préparation du poste ne concerne que Windows.'); return 0 }
+  const box = (type, message, detail, buttons) => {
+    const o = { type, title: 'CEI Examen — autorisation de l\'administrateur', message, detail, buttons: buttons || ['OK'], defaultId: 0, cancelId: (buttons || ['OK']).length - 1, noLink: true }
+    return parent && !parent.isDestroyed() ? dialog.showMessageBox(parent, o) : dialog.showMessageBox(o)
+  }
+  if (process.platform !== 'win32') { if (!auto) await box('info', 'Cette autorisation ne concerne que Windows.'); return 0 }
   if (kind === 'remove') {
-    const r = await box('question', 'Retirer la préparation de ce poste ?', 'CEI Examen ne pourra plus arrêter seul les services interdits (TeamViewer, AnyDesk…). Windows demandera l\'autorisation d\'un administrateur.', ['Retirer', 'Annuler'])
+    const r = await box('question', 'Retirer l\'autorisation de ce poste ?', 'CEI Examen ne pourra plus arrêter seul les services interdits (TeamViewer, AnyDesk…). Windows demandera la confirmation de l\'administrateur.', ['Retirer', 'Annuler'])
     if (r.response !== 0) return 0
     const ok = await guard.installHelper('remove')
-    await box(ok ? 'info' : 'warning', ok ? 'Préparation retirée.' : 'Le retrait n\'a pas pu être fait (autorisation refusée).')
+    await box(ok ? 'info' : 'warning', ok ? 'Autorisation retirée.' : 'Le retrait n\'a pas pu être fait (confirmation refusée).')
     return ok ? 0 : 1
   }
-  if (await guard.helperAvailable(true) && guard.helperUpToDate()) { await box('info', 'Ce poste est déjà préparé.', 'CEI Examen arrête déjà seul les logiciels interdits pendant un examen.'); return 0 }
-  const r = await box('question', 'Préparer ce poste pour les examens ?',
-    'À faire UNE SEULE FOIS par ordinateur, par une personne qui a les droits d\'administrateur (le technicien de la salle).\n\n' +
-    'CEI Examen pourra ensuite arrêter SEUL, pendant un examen, les logiciels interdits (TeamViewer, AnyDesk, capture d\'écran, visioconférence…), ' +
-    'même en tâche de fond et même pour un étudiant sans droits d\'administrateur. Aucun autre droit n\'est accordé.\n\n' +
-    'Windows va demander l\'autorisation d\'un administrateur.\n\nÉtudiant sans droits d\'administrateur sur cet ordinateur : choisissez « Plus tard ».', ['Préparer ce poste', 'Plus tard'])
-  if (r.response !== 0) return 0
+  if (await guard.helperAvailable(true) && guard.helperUpToDate()) { if (!auto) await box('info', 'Cet ordinateur est déjà autorisé.', 'CEI Examen arrête déjà seul les logiciels interdits pendant un examen.'); return 0 }
+  const r = await box('question', 'CEI Examen a besoin de l\'autorisation de l\'administrateur de cet ordinateur',
+    'Une seule fois. Elle permet à CEI Examen d\'arrêter AUTOMATIQUEMENT, pendant un examen, les logiciels interdits (TeamViewer, AnyDesk, capture d\'écran, ' +
+    'visioconférence…), même ouverts en arrière-plan. Aucun autre droit n\'est accordé.\n\n' +
+    'Windows va vous demander de confirmer. Sans cette autorisation, vous devrez fermer ces logiciels vous-même avant chaque examen.', ['Autoriser', 'Plus tard'])
+  if (r.response !== 0) return 2                                     // 2 = reporté (voir maybeOfferStation)
   const ok = await guard.installHelper('install')
-  await box(ok ? 'info' : 'warning', ok ? 'Poste préparé.' : 'La préparation n\'a pas pu être faite.',
-    ok ? 'CEI Examen arrêtera désormais seul les logiciels interdits pendant un examen.' : 'L\'autorisation a été refusée ou ce compte n\'a pas les droits d\'administrateur. Vous pourrez la refaire : menu Démarrer → CEI Examen → Préparer le poste (administrateur).')
+  await box(ok ? 'info' : 'warning', ok ? 'Autorisation enregistrée.' : 'L\'autorisation n\'a pas pu être enregistrée.',
+    ok ? 'CEI Examen arrêtera désormais seul les logiciels interdits pendant un examen.' : 'La confirmation de Windows a été refusée, ou ce compte n\'a pas les droits d\'administrateur de l\'ordinateur. CEI Examen vous la redemandera plus tard ; vous pouvez aussi la donner depuis le menu Démarrer → CEI Examen → Autoriser l\'arrêt automatique des logiciels interdits.')
   return ok ? 0 : 1
 }
 
+/** Au lancement (hors examen) : propose l'autorisation si elle manque ou si le script a changé ; après « Plus tard » ou un refus, on ne redemande
+ *  qu'au bout de 3 jours (jamais pendant un examen, jamais en essai automatique). */
+const stationFile = () => path.join(app.getPath('userData'), 'station.json')
+function markStationAsked() { try { fs.writeFileSync(stationFile(), JSON.stringify({ askedAt: Date.now(), version: cfg.version })) } catch { /* non fatal */ } }
+async function maybeOfferStation() {
+  if (process.platform !== 'win32' || cfg.test || exam.active || !win || win.isDestroyed()) return
+  let st = {}; try { st = JSON.parse(fs.readFileSync(stationFile(), 'utf8')) } catch { /* première fois */ }
+  if (await guard.helperAvailable(true) && guard.helperUpToDate()) return
+  if (st.askedAt && Date.now() - st.askedAt < 3 * 86400000 && st.version === cfg.version) return
+  markStationAsked()
+  const code = await prepareStation('install', { auto: true, parent: win })
+  log('STATION', 'proposition au lancement, code', code)
+}
+
 app.whenReady().then(async () => {
-  if (STATION_MODE) { const code = await prepareStation(STATION_MODE).catch(e => { log('ERR préparation', e.message); return 1 }); app.exit(code); return }
+  if (STATION_MODE) {            // lancé par l'installateur (avec --auto : rien n'est dit si le poste est déjà autorisé) ou par le raccourci du menu Démarrer
+    const auto = process.argv.includes('--auto')
+    const code = await prepareStation(STATION_MODE, { auto }).catch(e => { log('ERR autorisation', e.message); return 1 })
+    if (auto && code !== 0) markStationAsked()              // « Plus tard » à l'installation : pas de seconde demande aussitôt au premier lancement
+    app.exit(code); return
+  }
   const ses = session.defaultSession
   const okPerm = new Set(['media', 'display-capture', 'fullscreen', 'notifications', 'clipboard-sanitized-write', 'keyboardLock', 'window-management', 'speaker-selection', 'pointerLock'])
   ses.setPermissionRequestHandler((wc, perm, cb) => cb(okPerm.has(perm) && isAllowed(wc.getURL())))
@@ -584,6 +606,7 @@ app.whenReady().then(async () => {
   guard.helperAvailable().then(ok => { helperFlag = ok; log('HELPER', ok ? 'préparation du poste présente' : 'absente') }).catch(() => {})
   log('START', cfg.version, process.platform, 'vm=' + vmInfo.vm, vmInfo.hint)
   createWindow()
+  setTimeout(() => { maybeOfferStation().catch(e => log('ERR autorisation', e.message)) }, 6000)       // hors examen : voir maybeOfferStation
   if (!cfg.test) {                                         // contrôle au démarrage (avant la connexion), puis régulièrement hors examen
     // Départs étalés au hasard : 3000 étudiants ne téléchargent pas 100 Mo à la même seconde
     setTimeout(() => checkUpdate('startup'), 2500 + Math.floor(Math.random() * cfg.updateJitterMs))
