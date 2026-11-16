@@ -1,21 +1,21 @@
 Unicode true
 !define APP "CEI Examen"
 !define EXE "CEI Examen.exe"
-!define VERSION "1.6.0"
+!define VERSION "1.7.0"
 !define KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\CEIExamen"
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 Name "${APP}"
-OutFile "/root/cei-client/dist/CEI-Examen-1.6.0-win-setup.exe"
+OutFile "/root/cei-client/dist/CEI-Examen-1.7.0-win-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\CEI Examen"
 InstallDirRegKey HKCU "Software\CEI Examen" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "CEI Examen ${VERSION} — Université Numérique Cheikh Hamidou Kane"
-VIProductVersion "1.6.0.0"
+VIProductVersion "1.7.0.0"
 VIAddVersionKey /LANG=1036 "ProductName" "CEI Examen"
 VIAddVersionKey /LANG=1036 "FileDescription" "Installateur de CEI Examen"
-VIAddVersionKey /LANG=1036 "FileVersion" "1.6.0"
+VIAddVersionKey /LANG=1036 "FileVersion" "1.7.0"
 VIAddVersionKey /LANG=1036 "LegalCopyright" "© 2026 UN-CHK — Centre d'Examen Intelligent"
 VIAddVersionKey /LANG=1036 "CompanyName" "UN-CHK — Centre d'Examen Intelligent"
 !define MUI_ICON "/root/cei-client/build/icon.ico"
@@ -40,7 +40,7 @@ Section "Installation"
   CreateDirectory "$SMPROGRAMS\CEI Examen"
   CreateShortcut "$SMPROGRAMS\CEI Examen\CEI Examen.lnk" "$INSTDIR\${EXE}"
   CreateShortcut "$SMPROGRAMS\CEI Examen\Désinstaller CEI Examen.lnk" "$INSTDIR\Désinstaller CEI Examen.exe"
-  CreateShortcut "$SMPROGRAMS\CEI Examen\Préparer le poste (administrateur).lnk" "$INSTDIR\${EXE}" "--prepare-poste"
+  CreateShortcut "$SMPROGRAMS\CEI Examen\Autoriser l'arrêt automatique des logiciels interdits.lnk" "$INSTDIR\${EXE}" "--prepare-poste"
   WriteRegStr HKCU "Software\CEI Examen" "InstallDir" "$INSTDIR"
   ; Applications installées (Paramètres Windows)
   WriteRegStr HKCU "${KEY}" "DisplayName" "${APP}"
@@ -60,10 +60,10 @@ Section "Installation"
   WriteRegStr HKCU "Software\Classes\ceiexamen" "URL Protocol" ""
   WriteRegStr HKCU "Software\Classes\ceiexamen\DefaultIcon" "" "$INSTDIR\${EXE},0"
   WriteRegStr HKCU "Software\Classes\ceiexamen\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'
-  ; Préparation du poste (une fois par ordinateur, par quelqu'un qui a les droits d'administrateur) : proposée à la fin d'une installation
+  ; Autorisation de l'administrateur (une fois par ordinateur) : demandée à la fin de l'installation, comme Safe Exam Browser, pour pouvoir arrêter les logiciels interdits ; proposée à la fin d'une installation
   ; interactive — jamais pendant une mise à jour automatique silencieuse. Déjà préparé : rien ne s'affiche.
   IfSilent +2
-    ExecWait '"$INSTDIR\${EXE}" --prepare-poste'
+    ExecWait '"$INSTDIR\${EXE}" --prepare-poste --auto'
 SectionEnd
 
 Section "Uninstall"
