@@ -22,6 +22,7 @@ const crypto = require('crypto')
 const cfg = require('./config')
 const guard = require('./guard')
 const updater = require('./updater')
+const runstate = require('./runstate')
 const { spawn } = require('child_process')
 
 app.userAgentFallback = `${app.userAgentFallback} CEIExamClient/${cfg.version}`
@@ -103,6 +104,7 @@ function createWindow() {
   win.setMenu(null)
   if (cfg.test) win.webContents.on('console-message', (_e, _l, msg, line) => console.log('PAGE>', msg, line))
   win.once('ready-to-show', () => win.show())
+  win.on('unresponsive', () => reportCrash('client_error', { kind: 'unresponsive', during_exam: exam.active }))
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))                 // aucune nouvelle fenêtre, jamais
   // Hors examen : la connexion (SSO UNCHK, Moodle…) passe par d'autres sites, seuls les liens https sont permis.
   // Pendant l'examen : un seul site, rien d'autre.
@@ -219,7 +221,7 @@ function startWatchers() {
         const left = await guard.closeApps(apps, selfIdentity(), { force: true })
         for (const a of apps) {
           const last = exam.forbiddenSeen.get('app:' + a.name) || 0
-          if (Date.now() - last > 60 * 1000) { exam.forbiddenSeen.set('app:' + a.name, Date.now()); report('client_app_closed', { name: a.name, still_open: left.some(x => x.name === a.name) }) }
+          if (Date.now() - last > 60 * 1000) { exam.forbiddenSeen.set('app:' + a.name, Date.now()); report('client_app_closed', { name: a.name, title: a.title || '', still_open: left.some(x => x.name === a.name) }) }
         }
       }
     } finally { sweeping = false }
@@ -267,6 +269,7 @@ function enterExamMode(opts = {}) {
   applyExamConfig(opts)
   if (exam.active || !win) return { ok: true, already: true }
   exam.active = true; exam.since = Date.now(); exam.forbiddenSeen.clear(); exam.remoteSeen = false; exam.stuck = ''
+  if (uncleanPrev) { const u = uncleanPrev; uncleanPrev = null; report('client_unclean_exit', u) }       // « l'application s'est fermée toute seule » : la cause probable est enfin tracée
   try { win.setKiosk(true) } catch { win.setFullScreen(true) }
   const tryDo = fn => { try { fn() } catch { /* option non disponible sur ce système */ } }
   tryDo(() => win.setAlwaysOnTop(true, 'screen-saver'))
@@ -535,6 +538,30 @@ if (cfg.test) {                                           // uniquement pour les
 app.on('second-instance', (_e, argv) => { const u = (argv || []).find(a => String(a).startsWith(PROTO + '://')); if (u) openDeepLink(u); if (win) { if (win.isMinimized()) win.restore(); win.focus() } })
 app.on('open-url', (e, u) => { e.preventDefault(); openDeepLink(u) })
 app.on('before-quit', e => { if (exam.active && !allowQuit) e.preventDefault() })
+app.on('will-quit', () => { try { runstate.end(runFile()) } catch { /* sans importance */ } })      // sortie normale : le prochain lancement ne signalera pas d'arrêt anormal
+
+// ── Plantages et blocages (18/11/2026) : avant, l'application mourait sans laisser de trace ni se relancer ─────────────────────────────────────────────
+const runFile = () => path.join(app.getPath('userData'), 'run-state.json')
+let uncleanPrev = null                                    // arrêt anormal du lancement précédent, signalé à l'entrée en examen (voir enterExamMode)
+const crashSeen = new Map()
+const reportCrash = (type, data) => {                     // au plus un signalement par nature et par minute (un moteur qui plante en boucle ne doit pas inonder le serveur)
+  const k = type + ':' + (data.kind || data.reason || ''); const last = crashSeen.get(k) || 0
+  if (Date.now() - last < 60000) return
+  crashSeen.set(k, Date.now())
+  setTimeout(() => report(type, data), 6000)             // laisse la page se recharger et reprendre sa tentative : sinon le signalement tombe avant que la page l'écoute
+}
+app.on('render-process-gone', (_e, wc, d) => {
+  log('ERR render-process-gone', d && d.reason, d && d.exitCode)
+  pageReady = false                                       // les signalements attendent le rechargement de la page
+  reportCrash('client_crash', { kind: 'render', reason: d && d.reason, exitCode: d && d.exitCode, during_exam: exam.active })
+  if (win && !win.isDestroyed() && wc === win.webContents && d && runstate.shouldReload(d.reason)) setTimeout(() => { try { win.reload() } catch { /* fenêtre fermée */ } }, 800)   // l'examen reprend seul
+})
+app.on('child-process-gone', (_e, d) => {
+  log('ERR child-process-gone', d && d.type, d && d.reason, d && d.exitCode)
+  if (d && d.reason !== 'clean-exit') reportCrash('client_crash', { kind: d.type, reason: d.reason, exitCode: d.exitCode, name: d.name || '', during_exam: exam.active })
+})
+process.on('uncaughtException', err => { log('ERR exception', err && err.stack ? String(err.stack).slice(0, 600) : String(err)); reportCrash('client_error', { kind: 'main', message: String(err && err.message || err).slice(0, 160) }) })
+process.on('unhandledRejection', err => { log('ERR rejet', String(err && err.stack || err).slice(0, 600)) })
 app.on('session-end', () => { allowQuit = true })
 app.on('window-all-closed', () => { if (!exam.active || allowQuit) app.quit() })
 
@@ -594,6 +621,9 @@ app.whenReady().then(async () => {
     if (auto) markStationAsked()                            // juste après l'installation : pas de seconde demande aussitôt au premier lancement
     app.exit(code); return
   }
+  uncleanPrev = runstate.begin(runFile(), { pid: process.pid, version: cfg.version })
+  if (uncleanPrev) log('START arrêt anormal du lancement précédent', JSON.stringify(uncleanPrev))
+  setInterval(() => runstate.beat(runFile(), { examActive: exam.active, examId: exam.examId }), 10000).unref()
   const ses = session.defaultSession
   const okPerm = new Set(['media', 'display-capture', 'fullscreen', 'notifications', 'clipboard-sanitized-write', 'keyboardLock', 'window-management', 'speaker-selection', 'pointerLock'])
   ses.setPermissionRequestHandler((wc, perm, cb) => cb(okPerm.has(perm) && isAllowed(wc.getURL())))

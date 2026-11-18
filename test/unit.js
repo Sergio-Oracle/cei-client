@@ -160,6 +160,27 @@ t('Windows : un processus nommé comme un service mais sans fenêtre visible n\'
   t('aide : noms demandables assainis', JSON.stringify(g.helperNames(['TeamViewer_Service.exe', 'a b', "x';y", 'AnyDesk'])) === JSON.stringify(['teamviewer_service', 'anydesk']))
   asyncChecks = Promise.all([asyncChecks, g.helperAvailable().then(a => t('aide : « non disponible » hors Windows, aucune demande déposée', a === false)), g.helperStop(['anydesk']).then(a => t('aide : demande d\'arrêt sans effet hors Windows', a === false))])
 }
+// ── 1.9.0 : composants système épargnés, titre de fenêtre journalisé, suivi des arrêts anormaux ──
+{
+  const SYS = ['3000|PickerHost|Choisir', '3100|svchost|', '3200|rundll32|Options', '3300|tposd|Volume', '3400|CrossDeviceStreamingHost|Phone', '3500|Notepad|Sans titre - Bloc-notes', '3600|msedgewebview2|Fenêtre | avec barre'].join('\r\n')
+  const sel = g.selectApps(g.parseWinApps(SYS), 'win32', self)
+  const names = sel.map(a => a.name)
+  t('1.9.0 : sélecteur de partage (PickerHost), svchost, rundll32 et affichage constructeur (tposd) ne sont plus fermés', !['PickerHost', 'svchost', 'rundll32', 'tposd', 'CrossDeviceStreamingHost'].some(n => names.includes(n)))
+  t("1.9.0 : un vrai logiciel (Bloc-notes) et un hôte d'application web (msedgewebview2) restent fermés", names.includes('Notepad') && names.includes('msedgewebview2'))
+  t('1.9.0 : le titre de la fenêtre fermée est conservé pour le journal (y compris s\'il contient « | »)', sel.find(a => a.name === 'Notepad').title.startsWith('Sans titre') && sel.find(a => a.name === 'msedgewebview2').title === 'Fenêtre | avec barre')
+  t('1.9.0 : la commande Windows renvoie bien le titre', /MainWindowTitle \+ '\|'|'\|' \+ \$_\.MainWindowTitle/.test(g.WIN_APPS_PS))
+  const R = require('../src/runstate'), fs = require('fs'), os = require('os'), path = require('path')
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rs-')), 'run-state.json')
+  t('1.9.0 : premier lancement : aucun arrêt anormal', R.begin(f, { pid: 10, version: '1.9.0', now: 1000 }) === null)
+  R.beat(f, { examActive: true, examId: 42, now: 5000 })
+  const u = R.begin(f, { pid: 11, version: '1.9.0', now: 20000 })
+  t("1.9.0 : lancement suivant après un arrêt NON propre : détecté, avec l'examen en cours et l'ancienneté du dernier battement", u && u.examActive === true && u.examId === 42 && u.secondsAgo === 15, JSON.stringify(u))
+  R.end(f)
+  t('1.9.0 : sortie propre : le lancement suivant ne signale rien', R.begin(f, { pid: 12, version: '1.9.0', now: 30000 }) === null)
+  t('1.9.0 : même processus relancé (même pid) : pas de fausse alerte', R.begin(f, { pid: 12, version: '1.9.0', now: 31000 }) === null)
+  fs.writeFileSync(f, '{pas du json'); t('1.9.0 : fichier d\'état illisible : aucune erreur, aucune alerte', R.begin(f, { pid: 13, version: '1.9.0', now: 40000 }) === null)
+  t('1.9.0 : plantage du moteur (crashed, oom, killed) → la page est rechargée ; fermeture voulue (clean-exit) → non', R.shouldReload('crashed') && R.shouldReload('oom') && R.shouldReload('killed') && !R.shouldReload('clean-exit') && !R.shouldReload(undefined))
+}
 asyncChecks.then(() => {
 console.log(`\n${ok}/${ok + ko} vérifications réussies`)
   process.exit(ko ? 1 : 0)

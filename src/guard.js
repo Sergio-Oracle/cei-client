@@ -243,7 +243,11 @@ async function detectVM() {
 const SYSTEM_ALLOW = {
   win32: new Set(['explorer', 'dwm', 'csrss', 'winlogon', 'taskhostw', 'sihost', 'ctfmon', 'searchhost', 'searchui', 'searchapp', 'startmenuexperiencehost',
     'shellexperiencehost', 'textinputhost', 'lockapp', 'runtimebroker', 'securityhealthsystray', 'widgets', 'widgetservice', 'fontdrvhost', 'conhost',
-    'nvda', 'jfw', 'narrator', 'magnify', 'osk', 'voiceaccess', 'systemsettingsbroker']),
+    'nvda', 'jfw', 'narrator', 'magnify', 'osk', 'voiceaccess', 'systemsettingsbroker',
+    // 18/11/2026 — composants fermés à tort pendant l'examen du 17/11 (journal : « application fermée » 145 fois chez 30 étudiants) : hôtes système et
+    // affichages à l'écran du constructeur (Lenovo : tposd). Les fermer faisait clignoter l'écran, pouvait interrompre le sélecteur de partage d'écran
+    // (PickerHost) et comptait un avertissement à l'étudiant pour un processus qu'il n'a jamais ouvert.
+    'pickerhost', 'svchost', 'rundll32', 'tposd', 'crossdevicestreaminghost']),
   darwin: new Set(['finder', 'dock', 'systemuiserver', 'loginwindow', 'controlcenter', 'notificationcenter', 'windowserver', 'universalaccessd', 'voiceover']),
   linux: new Set(['gnome-shell', 'plasmashell', 'xfdesktop', 'xfce4-panel', 'cinnamon', 'mate-panel', 'budgie-panel', 'xorg', 'xwayland', 'kwin_x11', 'kwin_wayland',
     'mutter', 'openbox', 'ibus-ui-gtk3', 'orca', 'onboard', 'gnome-session-b', 'cinnamon-session', 'lxpanel', 'pcmanfm-desktop']),
@@ -252,7 +256,7 @@ function setExtraAllow(list) { extraAllow = new Set((list || []).map(norm)) }
 
 /** Sorties brutes des commandes système → [{ pid, name }] (fonctions pures, testées avec des exemples réels de Windows et macOS). */
 function parseWinApps(txt) {
-  return String(txt || '').split(/\r?\n/).map(l => l.trim().split('|')).filter(x => x.length >= 2 && x[1]).map(([pid, name]) => ({ pid: parseInt(pid, 10), name }))
+  return String(txt || '').split(/\r?\n/).map(l => l.trim().split('|')).filter(x => x.length >= 2 && x[1]).map(([pid, name, ...title]) => ({ pid: parseInt(pid, 10), name, title: title.join('|') }))
 }
 function parseMacApps(txt) {
   const out = []
@@ -271,7 +275,7 @@ function selectApps(raw, platform, self) {
     const n = norm(r.name)
     if (!(r.pid || r.xid) || !n || self.pids.has(r.pid) || allow.has(n) || extraAllow.has(n) || self.names.has(n)) continue
     if (out.some(o => (r.pid && o.pid === r.pid) || (r.xid && o.xid === r.xid))) continue
-    out.push({ pid: r.pid || 0, xid: r.xid || null, name: String(r.name).replace(/\.(exe|app)$/i, '') })
+    out.push({ pid: r.pid || 0, xid: r.xid || null, name: String(r.name).replace(/\.(exe|app)$/i, ''), title: r.title ? String(r.title).slice(0, 80) : '' })
   }
   return out
 }
@@ -279,7 +283,7 @@ function selectApps(raw, platform, self) {
 // Seules comptent les applications VISIBLES de la session de l'étudiant : un service du système (session 0, fenêtre cachée sans titre,
 // ex. « IdeaShareService », 14/11/2026) n'est ni visible ni arrêtable sans droits d'administrateur — le lister enfermait l'étudiant
 // hors de son examen devant un bouton « Fermer ces applications » sans effet.
-const WIN_APPS_PS = "$s = (Get-Process -Id $PID).SessionId; Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.SessionId -eq $s } | ForEach-Object { $_.Id.ToString() + '|' + $_.ProcessName }"
+const WIN_APPS_PS = "$s = (Get-Process -Id $PID).SessionId; Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.SessionId -eq $s } | ForEach-Object { $_.Id.ToString() + '|' + $_.ProcessName + '|' + $_.MainWindowTitle }"
 
 /** Applications avec fenêtre à fermer : [{ pid, xid, name }]. `self` = { pids:Set, names:Set } de l'application CEI Examen. */
 async function listWindowApps(self) {
